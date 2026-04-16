@@ -1,0 +1,3 @@
+ROUND1/backtests/
+**/__pycache__/
+*.py[cod]

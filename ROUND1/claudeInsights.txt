@@ -1,0 +1,330 @@
+================================================================
+  ROUND 1 — TRADING INSIGHTS (claudeInsights.txt)
+  Author: "Claude the trader" — speaking as a seasoned market maker
+  Data: prices_round_1_day_{-2,-1,0}.csv, trades_round_1_day_{-2,-1,0}.csv
+  Products: ASH_COATED_OSMIUM, INTARIAN_PEPPER_ROOT
+  Position limit: 80 per product
+================================================================
+
+
+-----------------------------------------------------------------
+  EXECUTIVE SUMMARY — what's staring you in the face
+-----------------------------------------------------------------
+
+The two products in Round 1 are nearly perfect TEXTBOOK archetypes.
+You don't need a clever model — you need to stop treating them the
+same way.  The current trader.py (dual-EMA momentum on pepper,
+fixed-fair MM on osmium) has the right *shape* but is leaving
+money on the table.  traderPrime.py is more conservative (edge=7
+on osmium) and will under-trade.
+
+Headline facts (across all 3 days combined):
+
+  ASH_COATED_OSMIUM
+    mean mid          = 10,000.20
+    std mid           =      5.35    <-- tiny
+    range             =      [9977, 10023]
+    mean crossings    = 4,770        <-- reverts constantly
+    lag-1 mid autocorr= -0.495       <-- bid/ask bounce / reversion
+    avg spread        = 16.2 ticks   <-- HUGE spread, modal=16
+    spread=16 ticks   = 59% of the time
+    total book depth  = ~30 per side, top-of-book ~14
+    free-take ticks
+      asks < 10,000   = 4.8%  (buy the mispriced ask, sit on inventory)
+      bids > 10,000   = 4.5%  (hit the mispriced bid)
+
+  INTARIAN_PEPPER_ROOT
+    drift             = +1000.0 per day, EVERY day, slope = 0.01/tick
+    residual after detrend: std 2.2, range [-10.7, +10.7]
+    residual mean crossings = 12,735  <-- reverts hard AROUND the trend
+    100-tick return positive 99% of the time
+    avg spread        = 13.0 ticks (modal 11-14)
+    top-of-book vol   = ~11-12, total ~24
+    correlation with osmium: level 0.24 (time only), returns 0.02 (~0)
+
+Translation in plain English:
+
+  * OSMIUM is a COIN PINNED TO 10,000.  It wobbles ±10 and
+    snaps back.  The spread is 16 wide.  Whoever captures that
+    spread most efficiently wins this product.  It is a pure
+    market-maker's dream.
+
+  * PEPPER is a FREIGHT TRAIN.  Every day, end-of-day price =
+    start-of-day price + 1000.  The slope is mechanically linear
+    (0.01 per tick).  Around that trend line it wiggles by ~±5.
+    You do NOT want to market-make this symmetrically — you'll
+    bleed to death being short into a guaranteed +1000 rally.
+    You want to RIDE the trend and clip noise AROUND it.
+
+
+-----------------------------------------------------------------
+  ASH_COATED_OSMIUM — deep dive
+-----------------------------------------------------------------
+
+Statistical signature:
+  - Stationary around 10,000 (mean drift across 3 days = 0.00004/tick)
+  - 94.4% of ticks are within ±10 of 10,000
+  - 70.3% within ±5.  36.5% within ±2.
+  - Lag-1 mid-change autocorr = -0.495.  That is bid/ask bounce:
+    prices oscillate between bid and ask tick-to-tick.  This is
+    NOT noise — it's structural, and it is EXACTLY what a market
+    maker monetises by sitting on both sides.
+  - The spread is mostly 16 (with some clusters at 18-19 and
+    occasional 6-13 when someone aggresses).  A 16-tick spread
+    is enormous on a 10,000-level price — a half-spread of 8 is
+    ~8 bps per round trip.  You should be trading this aggressively.
+
+Implication for fair value:
+  OSMIUM_FAIR = 10,000 (HARD-CODED, CONSTANT) is correct.
+  Do NOT use a rolling mean, EMA, or microprice-as-primary.
+  The data mean is 10,000.20 — call it 10,000.  Anything adaptive
+  will be chasing bid/ask bounce and giving back edge.
+
+  Small microprice tilt (±0.5 max) is harmless and marginally
+  helpful for queue priority, as trader.py already does.
+
+Toy backtests (run against the raw CSVs):
+  - z>1 mean-reversion on in-sample mean: +14,343 PnL, 1317 trades
+  - momentum (sign of 20-step return):     +31,255 PnL
+    ^^^ momentum "wins" only because it piggybacks on
+        mean-reversion at short horizons — NOT because there is
+        a real trend.  Don't be fooled.
+  - naive MM with edge=1, SMA-50 fair:     +1,772 PnL (weak)
+        This under-performs because SMA-50 drifts with bid/ask
+        bounce.  A FIXED fair at 10,000 blows this out of the
+        water.
+
+RECOMMENDED STRATEGY: Aggressive fixed-fair market maker
+  fair             = 10,000  (constant)
+  edge             = 1        (post at 9999 / 10001)
+  skew_divisor     = 20-30    (gently flatten when inventory builds)
+  microprice tilt  = optional, ±0.5 max
+
+  Two-phase loop per tick:
+    1. TAKE: sweep every ask < fair (buy it), sweep every bid >
+       fair (sell it).  This alone yields ~5% of ticks in free
+       edge against a deterministic anchor.
+    2. MAKE: post a full-size bid at fair-edge-skew and ask at
+       fair+edge-skew for the remaining capacity.
+
+  Sanity guards (all present in trader.py):
+    - never cross the book (post_bid < best_ask, post_ask > best_bid)
+    - if edges collapse, fall back to fair±1
+
+  What's wrong with traderPrime.py here:
+    OSMIUM_EDGE = 7 posts at 9993 / 10007.  Given the book is
+    nearly always 9992 / 10008 with spread=16, those quotes sit
+    INSIDE the book and get almost no fills at the edge you want.
+    You essentially only earn the sweep PnL from the ~5% of free-
+    take ticks.  Cut edge to 1-2.  trader.py (edge=1) is right.
+
+  What to IMPROVE over trader.py:
+    - Consider edge=2 if edge=1 leads to adverse selection on
+      ticks where the book is wider than 16; the deeper book
+      (9997 bid, 10003 ask on the 2nd level) says this is rare.
+      Stick with edge=1; monitor fill ratio.
+    - Skew denominator could be adaptive: when abs(position)>60,
+      pull the distant quote 1 tick further to accelerate flatten.
+    - Use *per-level* book vol when sweeping (already done).
+
+
+-----------------------------------------------------------------
+  INTARIAN_PEPPER_ROOT — deep dive
+-----------------------------------------------------------------
+
+Statistical signature (this is where the current code leaves
+money on the table):
+
+  Daily trajectory:
+    Day -2:  9998.5 -> 11001.5   (+1003.0)
+    Day -1: 10998.5 -> 11998.0   (+ 999.5)
+    Day  0: 11998.5 -> 13000.0   (+1001.5)
+
+  The drift is LITERALLY constant: slope = 0.01 price units per
+  timestamp, every day, to four-decimal precision.  This is NOT
+  random — it's a planted linear trend.
+
+  After subtracting the linear trend, what's left?
+    residual std          =  2.20
+    residual range        =  [-10.7, +10.7]
+    residual zero cross.  = 12,735   <-- reverts constantly
+    residual lag-1 autocorr (level changes) = -0.50
+  So the RESIDUAL behaves exactly like osmium: tight
+  mean-reverting noise around a moving anchor.
+
+  Implication: PEPPER = (linear drift) + (osmium-style wobble).
+
+  The 99% "positive 100-tick return" statistic is the killer.
+  There is effectively no 100-tick window where the price is
+  DOWN vs 100 ticks ago.  Being systematically long — even with
+  ZERO alpha — earns ~3,000 ticks of price appreciation on 80
+  units = up to +240,000 of mark-to-market gain over 3 days.
+
+Toy backtests:
+  - z>1 mean-reversion on FULL-WINDOW mean: +1,501.5 PnL, 1 trade
+        (useless — the mean drifts, so the z-score degenerates)
+  - momentum (20-step sign):                +22,771.5 PnL
+        (ok, but under-uses the deterministic trend)
+  - naive SMA-50 MM, edge=1:               -140,283.0 PnL  <<<<<<
+        CATASTROPHIC.  A symmetric market maker with a lagging
+        fair value is being systematically run over by the trend.
+        This is EXACTLY what traderPrime.py risks doing with its
+        PEPPER_ALPHA=0.7 single EMA and symmetric edges.
+
+RECOMMENDED STRATEGY: Trend-aware fair value with asymmetric quoting
+
+  The right fair value is NOT a moving average.  It is an
+  explicit *projected* fair:
+
+      fair_trend(t) = anchor_price + 0.01 * (t - anchor_t)
+
+  where (anchor_t, anchor_price) is established by the first few
+  ticks of the session (e.g. initialise anchor_price = first mid,
+  anchor_t = first timestamp; optionally re-anchor slowly using
+  an EMA of the *detrended* residual).
+
+  Then:
+    - TAKE anything with ask < fair_trend - small_margin (buy)
+    - TAKE anything with bid > fair_trend + small_margin (sell)
+    - MAKE asymmetric quotes:
+         post_bid = fair_trend - 2      (eager to accumulate long)
+         post_ask = fair_trend + 4 to 6 (stingy with longs — the
+                                          trend keeps lifting price)
+    - BIAS inventory LONG: skew target ~+40 (not 0).  Only flatten
+      when position exceeds +70 to protect the limit.
+
+  Why NOT use the dual-EMA in trader.py as-is?
+    PEPPER_FAST_ALPHA=0.35, PEPPER_SLOW_ALPHA=0.06 is reasonable
+    as a *reactive* momentum detector, but:
+      (a) EMAs LAG the true trend of +0.01 per tick.  The fast EMA
+          sits systematically BELOW true price in an up-trend and
+          you quote a bid that never fills while your ask (above
+          the lagging EMA, still below actual future price) gets
+          picked off.
+      (b) The fair value doesn't know the drift is deterministic
+          +0.01/tick.  Bake it in explicitly.
+
+  Why NOT pure trend-following (always max long)?
+    Works but ignores noise PnL.  The residual wobbles ±10 —
+    there's extra PnL from buying the dips and clipping the
+    spread AROUND the trend line.  The combined "trend-tilted
+    market maker" captures both.
+
+  Minimum viable upgrade if you want to keep the dual-EMA:
+    - Start with fair = mid
+    - At each tick add an EXPLICIT linear-drift correction:
+        fair += 0.01 * (t - t_start_of_session)
+      This replaces lagged-EMA momentum with the real slope
+      and is the single biggest PnL lever on pepper.
+
+Spread / liquidity considerations:
+  - Avg spread 13, typical 11-14.  So an edge of 2 lands you
+    INSIDE the current top of book ~50% of the time, giving
+    queue priority without crossing.
+  - Top-of-book volume ~11-12.  Your 80-limit is realistic to
+    fill against in a few ticks.
+
+
+-----------------------------------------------------------------
+  PRODUCT-BY-PRODUCT RECIPE (short form)
+-----------------------------------------------------------------
+
+ASH_COATED_OSMIUM
+  Strategy:        Fixed-fair aggressive market-maker
+  Fair value:      CONSTANT 10,000 (+ optional ±0.5 microprice tilt)
+  Edge:            1 (quote 9999 / 10001)
+  Take rule:       ask < 10000 => buy; bid > 10000 => sell
+  Skew:            position // 20
+  Position target: 0 (symmetric)
+  Expected PnL:    multiple thousands per day — this product
+                   pays the rent.
+  Do NOT:          use a rolling-mean fair; widen the edge past 2;
+                   place risk-reversal (one-sided) quotes.
+
+INTARIAN_PEPPER_ROOT
+  Strategy:        Trend-tilted asymmetric market-maker
+  Fair value:      anchor + 0.01 * (t - t_anchor)
+                   (initialise anchor on first tick; optionally
+                    refresh anchor via EMA of (mid - fair_trend))
+  Edge:            bid_edge=2, ask_edge=4 (asymmetric!)
+  Take rule:       ask < fair_trend     => buy
+                   bid > fair_trend + 5 => sell (rarely profitable)
+  Skew:            position // 15, biased around target +40
+  Position target: +40 (bias long to ride the trend)
+  Expected PnL:    dominated by trend PnL (ride 80 units * 1000
+                   drift/day); plus spread clip around residual.
+  Do NOT:          market-make symmetrically; use SMA-50 fair;
+                   get caught short before a guaranteed up-leg.
+
+(If a third product appears in the actual round that wasn't in
+this CSV sample, fall back to mid-based quoting with edge=2,
+limit=80, and skew=position//40 until you can characterise it.)
+
+
+-----------------------------------------------------------------
+  CRITIQUE OF THE TWO EXISTING TRADERS
+-----------------------------------------------------------------
+
+trader.py  (current "optimized" version)
+  OSMIUM:  GOOD.  Fixed fair 10,000, edge=1, skew//20, microprice
+           tilt.  This is essentially the textbook answer — ship it.
+  PEPPER:  MEDIOCRE.  Dual-EMA momentum is chasing a trend that
+           is actually deterministic.  The EMA lags; you get
+           adverse-selected on the upside.  The asymmetric edges
+           and the skew//15 help, but the fair value is still
+           structurally behind the market.  Biggest upgrade:
+           replace the fair-value calculation with the explicit
+           linear-drift projection above.
+
+traderPrime.py  (simpler, more conservative)
+  OSMIUM:  UNDER-AGGRESSIVE.  OSMIUM_EDGE=7 buries the quote
+           inside the real book.  Reduce to 1-2.
+  PEPPER:  DANGEROUS.  Single EMA with alpha=0.7 + symmetric
+           edges = SMA-style fair that lags the trend.  Against
+           a deterministic +1000/day rally this is the exact
+           configuration that lost 140k in the toy MM backtest.
+           Either rebuild with explicit drift OR lean on
+           trader.py's dual-EMA + asymmetry as a minimum.
+
+Concrete numerical tweaks (in order of expected PnL impact):
+  1. [Pepper] Add explicit +0.01/tick drift into fair value.
+  2. [Pepper] Bias position target to +40 rather than 0.
+  3. [Osmium, for traderPrime.py] Cut OSMIUM_EDGE from 7 to 1.
+  4. [Osmium] Add microprice ±0.5 tilt to improve queue priority.
+  5. [Pepper] Widen ask edge to 4-6 while keeping bid edge at 2.
+
+
+-----------------------------------------------------------------
+  RISK NOTES / WATCH-OUTS
+-----------------------------------------------------------------
+
+  * The +1000/day pepper drift may NOT persist in live Round 1
+    data — it is almost certainly a synthetic generator.  If the
+    live slope is different or changes sign, the explicit-drift
+    fair must be able to re-anchor.  Use a slow EMA of (mid -
+    fair_trend) as a drift-adjustment term that wakes up only if
+    residual bias persists for, say, 500+ ticks.
+  * Position limit is 80 per product — the engine will silently
+    drop orders that would breach this.  The sweep phase MUST
+    clamp to (LIMIT - position) / (LIMIT + position) as both
+    trader.py and traderPrime.py already do.
+  * Do NOT place quotes at a tick that crosses the book (already
+    handled; keep those sanity checks — they are cheap insurance).
+  * No cross-product signal is exploitable:  corr_returns ≈ 0.
+    Don't waste code on a pair trade.
+
+-----------------------------------------------------------------
+  FINAL ANSWER
+-----------------------------------------------------------------
+
+  OSMIUM => fixed-fair market making at 10,000, edge=1, tight
+            inventory skew.  (Use trader.py's _trade_osmium.)
+
+  PEPPER  => linear-drift fair value (fair = anchor + 0.01*Δt)
+            + asymmetric edges (bid tight, ask wide)
+            + long-biased position target (~+40)
+            + sweep takes against fair_trend.
+            (Upgrade trader.py's _trade_pepper by replacing the
+             fast-EMA fair with the explicit drift projection.)
+
+================================================================

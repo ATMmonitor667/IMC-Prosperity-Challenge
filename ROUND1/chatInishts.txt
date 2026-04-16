@@ -1,0 +1,223 @@
+ROUND 1 TRADER INSIGHTS
+Generated from: traderPrime.py, prices_round_1_day_-2/-1/0.csv, trades_round_1_day_-2/-1/0.csv
+
+Executive view
+--------------
+The two Round 1 products should not be traded with the same logic.
+
+ASH_COATED_OSMIUM is a stationary, mean-reverting market-making product. Its fair value is very close to 10,000 across all three days, with small deviations and a wide quoted spread. The best style here is fixed-fair market making plus inventory skew, not trend following.
+
+INTARIAN_PEPPER_ROOT is a trending product with a very clean upward drift of about 1,000 price units per day. The best style here is a trend-aware fair value model, then market making around that moving fair. Pure long-run mean reversion is the wrong model for Pepper, but short-term bid/ask bounce still exists, so the fair estimator should be smoothed.
+
+Current traderPrime.py backtest
+-------------------------------
+Current traderPrime.py total profit across the three training days: 257,306.
+
+By day:
+- Day -2: 84,367 total
+  - ASH_COATED_OSMIUM: 8,728
+  - INTARIAN_PEPPER_ROOT: 75,639
+- Day -1: 88,663 total
+  - ASH_COATED_OSMIUM: 12,169
+  - INTARIAN_PEPPER_ROOT: 76,494
+- Day 0: 84,276 total
+  - ASH_COATED_OSMIUM: 9,534
+  - INTARIAN_PEPPER_ROOT: 74,742
+
+Product totals:
+- ASH_COATED_OSMIUM: 30,431
+- INTARIAN_PEPPER_ROOT: 226,875
+
+This means most of the current edge is coming from Pepper. Osmium is profitable, but it is a smaller and more mechanical spread-capture trade.
+
+The alternate ROUND1/trader.py backtested at only 101,163 total. That file has more complicated dual-EMA and microprice logic, but the simpler traderPrime.py is much stronger on the provided data. My read: the extra complexity in trader.py is not buying enough edge to justify the added lag, asymmetry, and parameter risk.
+
+Data cleaning note
+------------------
+Some rows have mid_price equal to 0. These are invalid for price analysis and should be ignored, not treated as real prices.
+
+Invalid zero-mid rows:
+- ASH_COATED_OSMIUM: 49 rows total
+- INTARIAN_PEPPER_ROOT: 54 rows total
+
+Both products have about 92 percent two-sided book snapshots after filtering, so the data is still very usable.
+
+ASH_COATED_OSMIUM data insights
+-------------------------------
+Filtered day-by-day behavior:
+- Day -2: open 10010.0, close 9993.5, mean 9998.17, stdev 5.22, min 9979.0, max 10019.0
+- Day -1: open 10003.0, close 10002.0, mean 10000.83, stdev 4.45, min 9982.0, max 10019.0
+- Day 0: open 10013.0, close 10007.0, mean 10001.61, stdev 5.68, min 9977.0, max 10023.0
+- Combined mean from the existing analysis script: 10000.20
+- Combined stdev: 5.35
+- Combined range: 46.0
+
+Order-book behavior:
+- Average spread: about 16.18
+- Median spread: 16
+- Most common spread: 16, appearing about 63.7 percent of two-sided snapshots
+- Average bid depth: 30.16
+- Average ask depth: 30.21
+- Average book imbalance is basically neutral: -0.0014
+
+Return behavior:
+- Lag-1 return autocorrelation is about -0.49 to -0.50 each day.
+- This is classic bid/ask bounce and short-term mean reversion.
+- One-tick or short-horizon momentum is bad on this product.
+- Simple filtered signal tests show momentum loses and mean reversion wins:
+  - momentum_k=1 unit mid PnL: -33,224.5
+  - momentum_k=20 unit mid PnL: -30,500.0
+  - meanrev_ma10 unit mid PnL: +35,584.0
+  - meanrev_ma50 unit mid PnL: +34,028.0
+
+Best algorithm for ASH_COATED_OSMIUM
+------------------------------------
+Use a fixed-fair market maker / mean-reversion algorithm.
+
+Recommended structure:
+1. Anchor fair value around 10,000. A slight adjustment toward 10,000.2 or a slow rolling mean is acceptable, but do not make it trend-following.
+2. Aggressively buy asks below fair and sell bids above fair.
+3. Post passive quotes inside the naturally wide spread, centered around fair.
+4. Keep strong inventory skew. If long, shift both quotes down; if short, shift both quotes up.
+5. Avoid one-tick momentum signals. The data says the next tick tends to reverse.
+6. Do not use a pair trade with Pepper. Return correlation between Osmium and Pepper is only about 0.016.
+
+Parameter view:
+- Current traderPrime.py uses fair 10,000, edge 7, skew denominator 40.
+- Edge 7 is sensible because the median spread is 16. Quoting fair +/- 7 often sits just inside the natural market without overpaying.
+- A tighter edge like 1 is not automatically better. ROUND1/trader.py uses much tighter logic and performed worse in backtest.
+- The main tuning knobs should be edge 6 to 8 and skew denominator around 30 to 50.
+
+My preferred Osmium algorithm:
+Fixed fair value = 10,000.2, take any order strictly better than fair, quote two-sided at fair +/- 7, and use inventory skew. Add a small book-imbalance fair shift only if it is capped below 0.5 price units. Do not let imbalance override the stationary fair.
+
+INTARIAN_PEPPER_ROOT data insights
+----------------------------------
+Filtered day-by-day behavior:
+- Day -2: open 9998.5, close 11001.5, change +1003.0, mean 10499.96, stdev 288.71
+- Day -1: open 10998.5, close 11998.0, change +999.5, mean 11500.03, stdev 288.65
+- Day 0: open 11998.5, close 13000.0, change +1001.5, mean 12500.17, stdev 288.72
+- Combined range: 3008.5
+- Combined mean is not a useful fair value because the product trends through the whole sample.
+
+The key Pepper feature is the almost linear upward drift:
+- Each day starts about 1,000 higher than the previous day.
+- Within each day, price rises about 1,000 from open to close.
+- This is not random walk behavior. It looks like a deterministic trend plus noisy microstructure.
+
+Order-book behavior:
+- Average spread rises by day:
+  - Day -2: 11.99
+  - Day -1: 13.01
+  - Day 0: 14.13
+- Median spread rises from 12 to 13 to 14.
+- Average bid depth: 24.19
+- Average ask depth: 24.27
+- Book imbalance average is basically neutral: -0.0031
+
+Return behavior:
+- Lag-1 return autocorrelation is still about -0.50, so there is strong short-term bid/ask bounce.
+- But long-horizon behavior is dominated by the upward drift.
+- Short-window mean reversion around a moving fair can work.
+- Mean reversion to a fixed historical mean is bad because the fair keeps rising.
+
+Rolling fair observations:
+- Short windows track Pepper well:
+  - 10-tick rolling fair average error: about 1.3 to 1.5
+  - 50-tick rolling fair average error: about 2.8
+- Long windows lag badly:
+  - 200-tick rolling fair average error: about 9.9
+  - 1000-tick rolling fair average error: about 47.5
+
+Best algorithm for INTARIAN_PEPPER_ROOT
+---------------------------------------
+Use a trend-aware fair value model with short-term market making around the trend.
+
+Recommended structure:
+1. Estimate a moving fair from recent mid prices, but include trend/slope so the fair does not lag.
+2. A high-alpha EMA is good. traderPrime.py uses alpha 0.7 and performs well.
+3. Even better: use a slope-adjusted EMA or online regression.
+   - Estimate fair_now from a fast EMA or short rolling mean.
+   - Estimate slope from recent mids.
+   - Forecast fair a few ticks forward: fair = fair_now + slope * forecast_horizon.
+4. Bias inventory in the trend direction. Since all three days trend upward, being long Pepper is structurally better than being flat or short.
+5. Quote asymmetrically:
+   - In uptrend, bid more aggressively and ask less aggressively.
+   - Do not sell too cheaply just because current inventory is positive.
+6. Still respect short-term reversal. Do not blindly buy after every uptick; use smoothed fair and buy when ask is cheap relative to forecast fair.
+
+Parameter view:
+- Current traderPrime.py uses EMA alpha 0.7, edge 5, skew denominator 60.
+- This is good because alpha 0.7 has very little lag against a smooth trend.
+- Edge 5 is inside the 12 to 14 tick natural spread, so it earns spread while still getting filled.
+- Skew denominator 60 is mild. For Pepper, I would consider stronger trend-aware inventory targeting instead of symmetric inventory neutralization.
+
+My preferred Pepper algorithm:
+Use a slope-adjusted EMA. Keep a fast EMA of mid price, keep a short estimate of slope, and set fair to EMA plus a small positive forecast adjustment. Buy asks below this forecast fair and sell bids above it. Post passive quotes around forecast fair with the bid tighter than the ask during the uptrend. Inventory target should be positive while the slope is positive, not zero.
+
+Cross-product insight
+---------------------
+Osmium and Pepper should be treated independently.
+
+Correlation:
+- Mid-price level correlation: about 0.243
+- Return correlation: about 0.016
+
+The level correlation is mostly caused by Pepper's deterministic climb and is not a tradeable relationship. The return correlation is essentially zero. A pair trade between Osmium and Pepper is not worth using for Round 1.
+
+Trade tape insight
+------------------
+Public trades are not the main source of edge here.
+
+ASH_COATED_OSMIUM:
+- 1,265 public trades total
+- Average quantity: 5.21
+- Average price: 10000.21
+
+INTARIAN_PEPPER_ROOT:
+- 1,011 public trades total
+- Average quantity: 5.17
+- Average price: 11495.94
+
+The trade tape confirms the same price regimes seen in the order book, but it is too sparse to be the core signal. Use it as confirmation at most.
+
+Specific critique of traderPrime.py
+-----------------------------------
+What it does well:
+- Correctly uses a fixed fair for Osmium.
+- Correctly uses a fast EMA fair for Pepper.
+- Sweeps clearly mispriced orders before posting passive quotes.
+- Uses inventory skew instead of letting positions drift without control.
+- Keeps the code simple, which is good for a competition bot.
+
+Where it can improve:
+- It skips trading when either side of the book is missing. Some one-sided snapshots may still contain useful liquidity.
+- It uses the same hard position limit for both products. That is fine if the exchange limit is truly 80 for both, but should be product-specific if limits differ.
+- Pepper inventory skew is symmetric around zero, but the data says the optimal inventory target should usually be positive while trend is positive.
+- Pepper fair is only an EMA. It should include an explicit slope/forecast component to reduce trend lag.
+- The passive quote sizes use full remaining capacity. That can maximize fills, but it can also create large inventory swings. Laddering order sizes across multiple price levels may improve risk-adjusted PnL.
+- The model does not use recent volatility or spread to adapt edge. Pepper spread rises from about 12 to 14 over the sample; edge should be allowed to move with market width.
+
+Final strategy recommendation
+-----------------------------
+Best per-commodity strategy:
+- ASH_COATED_OSMIUM: fixed-fair mean-reversion market maker.
+- INTARIAN_PEPPER_ROOT: slope-aware trend-following market maker.
+
+Avoid:
+- Pure momentum on Osmium.
+- Fixed historical mean reversion on Pepper.
+- Pair trading between Osmium and Pepper.
+- Overcomplicated EMA systems that reduce the clean edge. The simpler traderPrime.py already beats the more complex trader.py on these files.
+
+Most promising next implementation:
+1. Keep traderPrime.py as the base, because it is already strong.
+2. For Osmium, test fair values 9999.8 to 10000.5, edge 6 to 8, skew denominator 30 to 50.
+3. For Pepper, replace plain EMA fair with slope-adjusted EMA:
+   fair = fast_ema + slope_adjustment
+4. Give Pepper a positive inventory target when slope is positive.
+5. Make Pepper edge adaptive:
+   - tighter bid in uptrend
+   - wider ask in uptrend
+   - reverse this only if slope turns negative
+6. Backtest each product separately first, then combine. Pepper dominates total PnL, so do not sacrifice Pepper edge for small Osmium improvements.
