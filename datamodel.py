@@ -14,6 +14,12 @@ ObservationValue = int
 class Listing:
 
     def __init__(self, symbol: Symbol, product: Product, denomination: Product):
+        '''
+        Every algorithm and or class will have a explanation to it, I am going to break down the class code,
+        attribute by attribute, atom by atom.
+        The Listings class is a class which comprises of a Symbol, a Product and a Demonination.add()
+        So the listing class just looks like a {String, String, String}
+        '''
         self.symbol = symbol
         self.product = product
         self.denomination = denomination
@@ -21,7 +27,7 @@ class Listing:
                  
 class ConversionObservation:
 
-    def __init__(self, bidPrice: float, askPrice: float, transportFees: float, exportTariff: float, importTariff: float, sunlight: float, humidity: float):
+    def __init__(self, bidPrice: float, askPrice: float, transportFees: float, exportTariff: float, importTariff: float, sugarPrice: float, sunlightIndex: float):
         self.bidPrice = bidPrice
         self.askPrice = askPrice
         self.transportFees = transportFees
