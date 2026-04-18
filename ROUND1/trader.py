@@ -1,19 +1,17 @@
-"""Round 1 optimized trader — per-product strategies for maximum PnL.
+"""Round 1 trader with risk-aware market making.
 
-ASH_COATED_OSMIUM (stable, mean ≈ 10,000, std ≈ 5, spread ≈ 16):
-  Aggressive fixed-fair market maker with microprice adjustment.
-  Sweeps all mispriced resting orders, then posts tight passive quotes
-  with continuous inventory skew.  Edge = 1 captures the 16-tick spread
-  many times per day.
+This version keeps the OSMIUM fixed-fair edge capture, but makes PEPPER
+materially safer by removing hardcoded long-only behavior.
 
-INTARIAN_PEPPER_ROOT (trending, range 9,998 → 13,007, 17 mean crossings):
-  Dual-EMA momentum trend follower.  Fast EMA (α = 0.35) tracks the
-  current regime; slow EMA (α = 0.06) provides a trend baseline.
-  Momentum = fast − slow shifts the fair value in the trend direction,
-  making the bot aggressively take positions toward the trend.  Edges
-  are asymmetric: tight toward the trend, wide against it.
+PEPPER now uses:
+- fast/slow EMA regime filter
+- bounded slope forecast horizon
+- adaptive (sign-aware) inventory target
+- volatility-aware quote widening
+- inventory tapering for passive quote size
 
-State persisted as compact JSON in traderData (pepper EMAs only).
+These controls reduce directional tail risk and improve robustness against
+trend reversals while preserving opportunity capture during stable drift.
 """
 
 import json
@@ -21,32 +19,49 @@ from typing import Dict, List, Tuple
 
 from datamodel import Order, OrderDepth, TradingState
 
-# ── Product names ──────────────────────────────────────────────
+
+# ══════════════════════════════════════════════════════════════
+#   PRODUCTS  /  GLOBALS
+# ══════════════════════════════════════════════════════════════
+
 OSMIUM = "ASH_COATED_OSMIUM"
 PEPPER = "INTARIAN_PEPPER_ROOT"
 
-# ── Hard position limit (per product, set by the exchange) ─────
 LIMIT = 80
 
 # ── Osmium parameters ─────────────────────────────────────────
-OSMIUM_FAIR = 10_000.0     # long-run anchor (data mean = 10,000.20)
-OSMIUM_EDGE = 1            # passive quote distance from fair
-OSMIUM_SKEW_DIV = 20       # skew = position // div  → max ±4 at limit
+OSMIUM_FAIR        = 10_000.2   # empirical long-run mean
+OSMIUM_EDGE = 7
+OSMIUM_EDGE_FAR = 12
+OSMIUM_SIZE_NEAR = 60
+OSMIUM_SIZE_FAR = 20
+OSMIUM_SKEW_DENOM = 40
+OSMIUM_MICRO_CAP   = 0.5
+OSMIUM_TAKE_SLOP = 1
 
 # ── Pepper parameters ─────────────────────────────────────────
-PEPPER_FAST_ALPHA = 0.35   # responsive to current price
-PEPPER_SLOW_ALPHA = 0.06   # slow trend baseline
-PEPPER_EDGE = 2            # base passive edge
-PEPPER_SKEW_DIV = 15       # tighter skew for trending product  → max ±5
-PEPPER_MOM_FAIR_SCALE = 0.02   # momentum → fair shift multiplier
-PEPPER_MOM_FAIR_CAP = 5        # max absolute fair shift
-PEPPER_MOM_EDGE_SCALE = 0.01   # momentum → edge asymmetry multiplier
-PEPPER_MOM_EDGE_CAP = 3        # max edge asymmetry
+PEPPER_FAST_ALPHA = 0.45
+PEPPER_SLOW_ALPHA = 0.08
+PEPPER_SLOPE_ALPHA = 0.06
+PEPPER_PRIOR_SLOPE = 0.0
+PEPPER_FORECAST_TS_BASE = 800
+PEPPER_FORECAST_TS_MAX = 1500
+PEPPER_BID_EDGE_BASE = 3
+PEPPER_ASK_EDGE_BASE = 4
+PEPPER_SKEW_DENOM = 16
+PEPPER_TARGET_MAX = 35
+PEPPER_TREND_DEADZONE = 0.00030
+PEPPER_VOL_ALPHA = 0.10
+PEPPER_MIN_EDGE = 2
+PEPPER_MAX_EDGE = 10
+PEPPER_SIZE_BASE = 28
 
+
+# ══════════════════════════════════════════════════════════════
+#   ENTRY POINT
+# ══════════════════════════════════════════════════════════════
 
 class Trader:
-    """Entry point called by the exchange engine once per tick."""
-
     def run(
         self, state: TradingState
     ) -> Tuple[Dict[str, List[Order]], int, str]:
@@ -55,15 +70,12 @@ class Trader:
 
         for product, od in state.order_depths.items():
             position = state.position.get(product, 0)
-
-            # Need at least one side of the book
             if not od.buy_orders and not od.sell_orders:
                 result[product] = []
                 continue
 
             best_bid = max(od.buy_orders) if od.buy_orders else None
             best_ask = min(od.sell_orders) if od.sell_orders else None
-
             if best_bid is not None and best_ask is not None:
                 mid = (best_bid + best_ask) / 2.0
             elif best_bid is not None:
@@ -73,11 +85,11 @@ class Trader:
 
             if product == OSMIUM:
                 result[product] = _trade_osmium(
-                    od, position, best_bid, best_ask, mid, memory
+                    od, position, best_bid, best_ask, mid
                 )
             elif product == PEPPER:
                 result[product] = _trade_pepper(
-                    od, position, best_bid, best_ask, mid, memory
+                    od, position, best_bid, best_ask, mid, state.timestamp, memory
                 )
             else:
                 result[product] = []
@@ -85,32 +97,40 @@ class Trader:
         return result, 0, json.dumps(memory)
 
 
-# ──────────────────────────────────────────────────────────────
-#  ASH_COATED_OSMIUM — fixed-fair aggressive market maker
-# ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#   OSMIUM — fixed-fair aggressive MM with two-layer ladder
+# ══════════════════════════════════════════════════════════════
 
 def _trade_osmium(
     od: OrderDepth, position: int,
-    best_bid, best_ask, mid: float, memory: dict,
+    best_bid, best_ask, mid: float,
 ) -> List[Order]:
     fair = OSMIUM_FAIR
 
-    # Microprice adjustment: nudge fair toward the heavier side of the book
-    total_bid_vol = sum(abs(v) for v in od.buy_orders.values())
-    total_ask_vol = sum(abs(v) for v in od.sell_orders.values())
-    denom = total_bid_vol + total_ask_vol
+    # Microprice tilt (very mild)
+    tot_b = sum(abs(v) for v in od.buy_orders.values())
+    tot_a = sum(abs(v) for v in od.sell_orders.values())
+    denom = tot_b + tot_a
     if denom > 0:
-        imbalance = (total_bid_vol - total_ask_vol) / denom
-        fair += imbalance * 0.5          # ±0.5 max — very subtle
+        imbalance = (tot_b - tot_a) / denom
+        fair += imbalance * OSMIUM_MICRO_CAP
 
     orders: List[Order] = []
-    buy_cap = LIMIT - position           # room to buy before hitting +LIMIT
-    sell_cap = LIMIT + position          # room to sell before hitting -LIMIT
+    buy_cap = LIMIT - position
+    sell_cap = LIMIT + position
 
-    # ── Phase 1: sweep all mispriced resting orders ──
+    # Phase 1: AGGRESSIVE sweep. Take asks up to fair + OSMIUM_TAKE_SLOP
+    # and bids down to fair - OSMIUM_TAKE_SLOP. Lag-1 autocorr = -0.5,
+    # so any print away from 10,000 has strong reversion expectancy.
     for ask_price in sorted(od.sell_orders):
-        if ask_price >= fair or buy_cap <= 0:
+        if ask_price > fair + OSMIUM_TAKE_SLOP or buy_cap <= 0:
             break
+        # Discount: only take price-levels that are cheaper than fair
+        # or where we need inventory (position still short of target).
+        if ask_price >= fair and position >= 0:
+            # neutral or long already; paying premium only makes sense
+            # if price is clearly below 10000 — skip otherwise.
+            continue
         vol = min(abs(od.sell_orders[ask_price]), buy_cap)
         if vol > 0:
             orders.append(Order(OSMIUM, ask_price, vol))
@@ -118,87 +138,123 @@ def _trade_osmium(
             position += vol
 
     for bid_price in sorted(od.buy_orders, reverse=True):
-        if bid_price <= fair or sell_cap <= 0:
+        if bid_price < fair - OSMIUM_TAKE_SLOP or sell_cap <= 0:
             break
+        if bid_price <= fair and position <= 0:
+            continue
         vol = min(abs(od.buy_orders[bid_price]), sell_cap)
         if vol > 0:
             orders.append(Order(OSMIUM, bid_price, -vol))
             sell_cap -= vol
             position -= vol
 
-    # ── Phase 2: passive quoting with inventory skew ──
-    skew = position // OSMIUM_SKEW_DIV   # positive when long → shift quotes down
+    # Phase 2: passive ladder with inventory skew
+    skew = position // OSMIUM_SKEW_DENOM
+    fair_i = int(round(fair))
 
-    post_bid = int(round(fair)) - OSMIUM_EDGE - skew
-    post_ask = int(round(fair)) + OSMIUM_EDGE - skew
+    post_bid_near = fair_i - OSMIUM_EDGE - skew
+    post_ask_near = fair_i + OSMIUM_EDGE - skew
+    post_bid_far  = fair_i - OSMIUM_EDGE_FAR - skew
+    post_ask_far  = fair_i + OSMIUM_EDGE_FAR - skew
 
-    # Sanitize: never cross existing book or self-cross
-    if best_ask is not None and post_bid >= best_ask:
-        post_bid = best_ask - 1
-    if best_bid is not None and post_ask <= best_bid:
-        post_ask = best_bid + 1
-    if post_bid >= post_ask:
-        post_bid = int(round(fair)) - 1
-        post_ask = int(round(fair)) + 1
+    if best_ask is not None and post_bid_near >= best_ask:
+        post_bid_near = best_ask - 1
+    if best_bid is not None and post_ask_near <= best_bid:
+        post_ask_near = best_bid + 1
+    if post_bid_near >= post_ask_near:
+        post_bid_near = fair_i - 1
+        post_ask_near = fair_i + 1
 
-    if buy_cap > 0:
-        orders.append(Order(OSMIUM, post_bid, buy_cap))
-    if sell_cap > 0:
-        orders.append(Order(OSMIUM, post_ask, -sell_cap))
+    near_buy = min(OSMIUM_SIZE_NEAR, buy_cap)
+    near_sell = min(OSMIUM_SIZE_NEAR, sell_cap)
+    if near_buy > 0:
+        orders.append(Order(OSMIUM, post_bid_near, near_buy))
+        buy_cap -= near_buy
+    if near_sell > 0:
+        orders.append(Order(OSMIUM, post_ask_near, -near_sell))
+        sell_cap -= near_sell
+
+    far_buy = min(OSMIUM_SIZE_FAR, buy_cap)
+    far_sell = min(OSMIUM_SIZE_FAR, sell_cap)
+    if far_buy > 0 and post_bid_far < post_bid_near:
+        orders.append(Order(OSMIUM, post_bid_far, far_buy))
+    if far_sell > 0 and post_ask_far > post_ask_near:
+        orders.append(Order(OSMIUM, post_ask_far, -far_sell))
 
     return orders
 
 
-# ──────────────────────────────────────────────────────────────
-#  INTARIAN_PEPPER_ROOT — dual-EMA momentum trend follower
-# ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#   PEPPER — slope-projected fair + long-biased asymmetric MM
+# ══════════════════════════════════════════════════════════════
 
 def _trade_pepper(
     od: OrderDepth, position: int,
-    best_bid, best_ask, mid: float, memory: dict,
+    best_bid, best_ask, mid: float,
+    timestamp: int, memory: dict,
 ) -> List[Order]:
-
-    # ── Compute microprice for a better EMA input ──
+    # ── Microprice input (robust to bid/ask bounce) ──────────
     if best_bid is not None and best_ask is not None:
-        bid_vol = abs(od.buy_orders[best_bid])
-        ask_vol = abs(od.sell_orders[best_ask])
-        price_input = (best_bid * ask_vol + best_ask * bid_vol) / (bid_vol + ask_vol)
+        bv = abs(od.buy_orders[best_bid])
+        av = abs(od.sell_orders[best_ask])
+        price_in = (best_bid * av + best_ask * bv) / (bv + av) if (bv + av) else mid
     else:
-        price_input = mid
+        price_in = mid
 
-    # ── Update dual EMAs ──
-    fast_prev = memory.get("pf")
-    slow_prev = memory.get("ps")
+    # ── Fast/slow trend model and volatility estimate ─────────
+    ema_prev = memory.get("pfast")
+    slow_prev = memory.get("pslow")
+    slope_prev = memory.get("pslope", PEPPER_PRIOR_SLOPE)
+    vol_prev = memory.get("pvol", 1.0)
+    ts_prev = memory.get("pts")
 
-    if fast_prev is None:
-        fast_ema = price_input
-        slow_ema = price_input
+    if ema_prev is None:
+        ema = price_in
+        slow = price_in
+        slope = PEPPER_PRIOR_SLOPE
+        vol = 1.0
     else:
-        fast_ema = PEPPER_FAST_ALPHA * price_input + (1 - PEPPER_FAST_ALPHA) * fast_prev
-        slow_ema = PEPPER_SLOW_ALPHA * price_input + (1 - PEPPER_SLOW_ALPHA) * slow_prev
+        ema = PEPPER_FAST_ALPHA * price_in + (1 - PEPPER_FAST_ALPHA) * ema_prev
+        slow = PEPPER_SLOW_ALPHA * price_in + (1 - PEPPER_SLOW_ALPHA) * slow_prev
+        dt = max(1, timestamp - ts_prev) if ts_prev is not None else 100
+        inst_slope = (ema - ema_prev) / dt
+        inst_slope = max(-0.01, min(0.01, inst_slope))
+        slope = PEPPER_SLOPE_ALPHA * inst_slope + (1 - PEPPER_SLOPE_ALPHA) * slope_prev
+        abs_err = abs(price_in - ema)
+        vol = PEPPER_VOL_ALPHA * abs_err + (1 - PEPPER_VOL_ALPHA) * vol_prev
 
-    memory["pf"] = fast_ema
-    memory["ps"] = slow_ema
+    memory["pfast"] = ema
+    memory["pslow"] = slow
+    memory["pslope"] = slope
+    memory["pvol"] = vol
+    memory["pts"] = timestamp
 
-    # ── Momentum signal ──
-    momentum = fast_ema - slow_ema
+    # ── Slope-projected fair (horizon adapts to trend strength) ─
+    trend_conf = abs(ema - slow)
+    forecast_ts = PEPPER_FORECAST_TS_BASE + min(
+        PEPPER_FORECAST_TS_MAX - PEPPER_FORECAST_TS_BASE,
+        int(trend_conf * 180),
+    )
+    fair = ema + slope * forecast_ts
 
-    # ── Fair value = fast EMA shifted by momentum ──
-    #    Up-trend → fair pushed above fast EMA → aggressive buying
-    #    Down-trend → fair pushed below fast EMA → aggressive selling
-    trend_shift = min(abs(momentum) * PEPPER_MOM_FAIR_SCALE, PEPPER_MOM_FAIR_CAP)
-    if momentum > 0:
-        fair = fast_ema + trend_shift
+    # Directional target is adaptive, not hardcoded long-only.
+    if abs(slope) < PEPPER_TREND_DEADZONE:
+        target = 0
     else:
-        fair = fast_ema - trend_shift
+        target = int(min(PEPPER_TARGET_MAX, abs(slope) * 22000))
+        target = target if slope > 0 else -target
+        # Regime check: if fast/slow disagree with slope, de-risk.
+        if (target > 0 and ema < slow) or (target < 0 and ema > slow):
+            target = 0
 
+    # ── Sweep only when meaningfully mispriced vs fair ───────
     orders: List[Order] = []
     buy_cap = LIMIT - position
     sell_cap = LIMIT + position
+    take_band = max(1.0, 0.80 * vol)
 
-    # ── Phase 1: sweep mispriced orders vs momentum-adjusted fair ──
     for ask_price in sorted(od.sell_orders):
-        if ask_price >= fair or buy_cap <= 0:
+        if ask_price >= fair - take_band or buy_cap <= 0:
             break
         vol = min(abs(od.sell_orders[ask_price]), buy_cap)
         if vol > 0:
@@ -207,7 +263,7 @@ def _trade_pepper(
             position += vol
 
     for bid_price in sorted(od.buy_orders, reverse=True):
-        if bid_price <= fair or sell_cap <= 0:
+        if bid_price <= fair + take_band or sell_cap <= 0:
             break
         vol = min(abs(od.buy_orders[bid_price]), sell_cap)
         if vol > 0:
@@ -215,44 +271,55 @@ def _trade_pepper(
             sell_cap -= vol
             position -= vol
 
-    # ── Phase 2: momentum-adjusted passive quoting ──
-    skew = position // PEPPER_SKEW_DIV
+    # ── Inventory-aware quote placement ───────────────────────
+    skew = (position - target) // PEPPER_SKEW_DENOM
 
-    # Asymmetric edges: tight toward trend, wide against trend
-    mom_edge_raw = min(abs(momentum) * PEPPER_MOM_EDGE_SCALE, PEPPER_MOM_EDGE_CAP)
-    mom_edge = int(round(mom_edge_raw))
+    edge_extra = int(min(3, max(0, round(vol / 2.0))))
+    bid_edge = PEPPER_BID_EDGE_BASE + edge_extra
+    ask_edge = PEPPER_ASK_EDGE_BASE + edge_extra
+    if target > 0:
+        bid_edge -= 1
+        ask_edge += 1
+    elif target < 0:
+        bid_edge += 1
+        ask_edge -= 1
+    bid_edge = max(PEPPER_MIN_EDGE, min(PEPPER_MAX_EDGE, bid_edge))
+    ask_edge = max(PEPPER_MIN_EDGE, min(PEPPER_MAX_EDGE, ask_edge))
 
-    if momentum > 0:                        # UP-TREND
-        bid_edge = max(1, PEPPER_EDGE - mom_edge)   # tighter bid  → eager to buy
-        ask_edge = max(1, PEPPER_EDGE + mom_edge)   # wider ask    → hold longs
-    else:                                    # DOWN-TREND
-        bid_edge = max(1, PEPPER_EDGE + mom_edge)   # wider bid    → avoid buying
-        ask_edge = max(1, PEPPER_EDGE - mom_edge)   # tighter ask  → eager to sell
+    fair_i = int(round(fair))
+    post_bid = fair_i - bid_edge - skew
+    post_ask = fair_i + ask_edge - skew
 
-    post_bid = int(round(fair)) - bid_edge - skew
-    post_ask = int(round(fair)) + ask_edge - skew
-
-    # Sanitize
     if best_ask is not None and post_bid >= best_ask:
         post_bid = best_ask - 1
     if best_bid is not None and post_ask <= best_bid:
         post_ask = best_bid + 1
     if post_bid >= post_ask:
-        post_bid = int(round(fair)) - 1
-        post_ask = int(round(fair)) + 1
+        post_bid = fair_i - 1
+        post_ask = fair_i + 1
 
-    if buy_cap > 0:
-        orders.append(Order(PEPPER, post_bid, buy_cap))
-    if sell_cap > 0:
-        orders.append(Order(PEPPER, post_ask, -sell_cap))
+    inv_ratio = min(1.0, abs(position) / LIMIT)
+    size_taper = 1.0 - 0.70 * inv_ratio
+    base_size = max(6, int(round(PEPPER_SIZE_BASE * size_taper)))
+
+    buy_bias = max(0, target - position) // 8
+    sell_bias = max(0, position - target) // 8
+    bid_size = min(buy_cap, base_size + buy_bias)
+    ask_size = min(sell_cap, base_size + sell_bias)
+
+    if bid_size > 0:
+        orders.append(Order(PEPPER, post_bid, bid_size))
+    if ask_size > 0:
+        orders.append(Order(PEPPER, post_ask, -ask_size))
 
     return orders
 
 
-# ── Utility ────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#   Utility
+# ══════════════════════════════════════════════════════════════
 
 def _load(raw: str) -> dict:
-    """Safely deserialise traderData JSON; return empty dict on failure."""
     if not raw:
         return {}
     try:
