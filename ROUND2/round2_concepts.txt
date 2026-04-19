@@ -1,0 +1,535 @@
+================================================================================
+ IMC PROSPERITY - ROUND 2: CONCEPTS AND DATA ANALYSIS PLAYBOOK
+================================================================================
+
+Purpose of this file:
+  A single, in-depth, plain-text reference for everything worth knowing when
+  approaching Round 2 of IMC Prosperity - the trading concepts you need,
+  the data-analysis techniques that actually pay off on this round's CSVs,
+  and the distilled techniques used by past winners in Prosperity 1, 2, and 3.
+
+This file is intended to be read top to bottom. Nothing here depends on
+running code. Links to specific workspace files are kept as bare paths so
+they work in any editor.
+
+
+================================================================================
+ SECTION 1 - ROUND 2 OVERVIEW ACROSS PROSPERITY EDITIONS
+================================================================================
+
+Round 2 in IMC Prosperity has historically been the round where the competition
+moves beyond "one stable product + one noisy product" market making and forces
+you to reason about relationships between products (or between a product and
+an external exchange / observable factors). Exact products change each year;
+the underlying concepts repeat.
+
+--- Prosperity 1 (2023) -----------------------------------------------------
+  Products: COCONUTS, PINA_COLADAS
+  Core idea: highly correlated pair (>90%), classic PAIR TRADING.
+  Canonical solution: compute spread = P(PINA_COLADAS) - P(COCONUTS), take
+  z-score, short the spread when z > 1.5, long when z < -1.5, flatten
+  near zero. Hedge ratio sometimes refined with OLS (example: 1.551 slope
+  seen in public writeups).
+
+--- Prosperity 2 (2024) -----------------------------------------------------
+  Product: ORCHIDS (plus continuing AMETHYSTS / STARFRUIT from R1).
+  Twist: ORCHIDS could be traded both on the main island and on the South
+  Archipelago via a CONVERSION primitive, with import/export tariffs,
+  transport fees, and observable factors (sunlight, humidity, storage).
+  Canonical solution: CROSS-EXCHANGE ARBITRAGE rather than directional
+  prediction. Maximize (enter price here - exit price abroad - costs)
+  * execution probability. Teams that tried to regress ORCHIDS on sunlight
+  or humidity generally lost to teams that just arb'd the two venues.
+
+--- Prosperity 3 (2025) -----------------------------------------------------
+  Products: CROISSANTS, JAMS, DJEMBES, PICNIC_BASKET1, PICNIC_BASKET2.
+  PB1 = 6 CROISSANTS + 3 JAMS + 1 DJEMBE
+  PB2 = 4 CROISSANTS + 2 JAMS
+  Core idea: ETF-STYLE STATISTICAL ARBITRAGE. Compare basket price to the
+  sum of weighted component prices (synthetic). Trade the spread using
+  z-score thresholds. Top teams also did "two-way" pricing: use the
+  basket to imply a component fair and vice versa.
+
+--- Prosperity 4 (this workspace) -------------------------------------------
+  Products observed in the CSVs:
+    - ASH_COATED_OSMIUM
+    - INTARIAN_PEPPER_ROOT
+  See: ROUND2/prices_round_2_day_-1.csv, day_0.csv, day_1.csv
+  Observed behavior (from offline analysis and tuned traders):
+    - Osmium: mid pinned near 10,001 with tiny std, strong tick-level mean
+      reversion (lag-1 return autocorrelation ~ -0.50).
+    - Pepper: drifts +~1000 across a simulated day (day -1: 11k -> 12k;
+      day 0: 12k -> 13k; day 1: 13k -> 14k). Locally the detrended std
+      is small (~2.2) and also shows tick-level mean reversion.
+  Paired relationship:
+    - Global correlation of the two mids is weak (~ -0.08).
+    - Rolling correlation swings in [-0.83, +0.69].
+    - OLS residuals are NOT cleanly stationary (ADF p ~ 0.77).
+  Implication: no static pairs trade is safe; independent market making
+  per product is the dependable edge, pair/spread logic is an OPTIONAL
+  OVERLAY that must be gated by online correlation stability.
+
+
+================================================================================
+ SECTION 2 - CORE TRADING CONCEPTS TO KNOW FOR ROUND 2
+================================================================================
+
+2.1 MARKET MICROSTRUCTURE
+    - Mid price: (best_bid + best_ask) / 2. Simple, but noisy when one side
+      has thin volume.
+    - Microprice: volume-weighted mid:
+          microprice = (best_bid * ask_volume + best_ask * bid_volume)
+                       / (bid_volume + ask_volume)
+      Slightly better short-term fair because it leans toward the heavier
+      side (pressure indicator).
+    - L3 order book: bid_price_1..3 / ask_price_1..3 with volumes. Depth
+      beyond the top is useful for imbalance and for gauging how much size
+      you can absorb before the book "moves."
+    - Quoted spread: ask1 - bid1. Determines how wide you must quote to
+      avoid immediate adverse selection.
+    - Imbalance: (sum_bid_vol - sum_ask_vol) / (sum_bid_vol + sum_ask_vol).
+      Short-term pressure signal, capped so it never dominates fair.
+
+2.2 FAIR VALUE MODELS
+    - Fixed anchor: for strongly stable products (think Pearls / Amethysts
+      / Rainforest Resin) fair = constant from offline mean.
+    - EMA of mid or microprice:
+          ema_t = alpha * x_t + (1 - alpha) * ema_{t-1}
+      Small alpha -> smooth slow fair; larger alpha -> reactive. Pandas
+      "span" convention: alpha = 2 / (N + 1).
+    - Fast/slow EMA + slope: fast EMA tracks level, slow EMA tracks trend,
+      slope = (ema - ema_prev) / dt. fair = ema + slope * forecast_horizon.
+    - Ornstein-Uhlenbeck (mean-reverting) model: dS = theta * (mu - S) dt
+      + sigma dW. Used by rank-13 team pe049395 in Prosperity 2 to price
+      Amethysts-style products and to set quote sizes from execution
+      probability.
+    - Linear model for composites (basket): fair_basket = a + b1 * P1
+      + b2 * P2 + ... where (a, b_i) are fit by OLS on historical data.
+      CarterT27 (P3, 9th global) used this instead of nominal recipe.
+
+2.3 STATISTICAL ARBITRAGE
+    - Correlation vs cointegration: correlation says returns co-move, but
+      prices can still drift apart forever. Cointegration says a linear
+      combination of the (non-stationary) prices is stationary, which is
+      what you actually need for a mean-reverting spread.
+    - Pair trading recipe:
+        1. Estimate hedge ratio b (OLS: y = a + b * x).
+        2. Form spread = y - b * x.
+        3. Standardize: z = (spread - mean) / std (rolling or anchored).
+        4. Short spread when z > +thr, long when z < -thr, flatten near 0.
+    - Half-life of mean reversion (from AR(1) on residuals):
+          phi = Corr(resid_t, resid_{t-1})
+          half_life = -ln(2) / ln(phi)     (ticks)
+      Long half-life -> do not expect a quick round trip; scale position
+      and horizon accordingly.
+    - ADF test (stationarity of residuals): low p-value = evidence of
+      cointegration. Beware small samples / regime shifts.
+
+2.4 ETF / BASKET ARBITRAGE
+    - Synthetic basket: sum of component prices with known (or fitted)
+      weights.
+    - Two pricing directions:
+        basket_fair = synthetic
+        component_fair = basket_price / recipe (or via constraints
+                          when multiple baskets share components)
+    - Practical choices:
+        * Trade only the basket against synthetic to minimize slippage
+          (pe049395 P2).
+        * Trade both sides for a market-neutral hedge (hochfilzer P2,
+          Linear Utility P2 / ericcccsliu, Oravec P3).
+    - Spread signal again: z-score with mean anchored to fundamentals
+      (basket premium) and std from a small rolling window (Linear
+      Utility's "modified z-score"). Small window means z spikes when
+      vol compresses - often right before reversion.
+
+2.5 CONVERSIONS AND CROSS-EXCHANGE ARBITRAGE
+    (Relevant if a Prosperity 4 round exposes a South-Archipelago-style
+    conversion. Not in the current Round 2 data but listed for
+    completeness.)
+    - Per-timestamp conversion at foreign bid/ask after tariffs + fees.
+    - Arb only trades that net positive after all costs.
+    - Execution probability matters: posting "at fair" does not fill well
+      when there is a fixed foreign price; pe049395 used Poisson
+      probability modeling instead of exponential.
+
+2.6 INVENTORY MANAGEMENT
+    - Hard position limit per product (the simulator enforces).
+    - Skew: shift both quotes by a function of current position so you
+      lean back toward zero (e.g., skew = pos // SKEW_DENOM).
+    - Soft cap: above some |pos| threshold, shrink the side that would
+      grow the position further.
+    - Target bias: for a drifting product, inventory target != 0 can be
+      optimal (e.g., long bias on a name that drifts up). Gate this on
+      the signal that produced the bias so you flatten when it fades.
+
+2.7 EXECUTION
+    - Market-taking (crossing the book): pays the spread, guaranteed
+      fill, used when book price is already past your fair by more than
+      a vol-scaled threshold.
+    - Passive quoting (resting orders): earns spread, uncertain fill,
+      exposed to adverse selection.
+    - Layering: near layer close to fair (high fill rate, small size),
+      far layer further out (lower fill rate, catches spread widenings).
+    - Slippage: your backtest fill model is not reality - always expect
+      actual PnL to be below backtest PnL. Linear Utility explicitly
+      reported losing ~20k seashells to slippage vs backtest in P2 R3.
+
+2.8 TREND VS MEAN REVERSION
+    - Diagnostic: lag-1 autocorrelation of mid returns.
+        * AC1 < 0: tick-level mean reversion (MM-friendly).
+        * AC1 > 0: momentum (trend-following friendly).
+        * AC1 ~ 0: random walk / efficient at that horizon.
+    - A product can be MEAN-REVERTING at tick scale AND TRENDING at day
+      scale (the pepper case). You need BOTH:
+        * local MR for MM edges and inventory skew
+        * a slow trend lean so you do not systematically fade the drift
+
+2.9 RISK AND META-RISKS
+    - Overfitting: 3 historical days is little data. Simpler > fancier.
+    - Regime change: live day may have different vol/drift than train.
+    - Day-boundary artifacts: concatenating days produces fake jumps
+      unless you include `day` in the index.
+    - Overcomplicated logic: 90% of alpha in Prosperity comes from
+      correctly identifying fair and managing inventory; the rest is
+      parameter tuning.
+
+
+================================================================================
+ SECTION 3 - DATA ANALYSIS PLAYBOOK FOR ROUND 2 CSVs
+================================================================================
+
+Files you have:
+  prices_round_2_day_{-1, 0, 1}.csv
+    Schema: day;timestamp;product;bid_price_1;bid_volume_1;...;ask_price_3;
+            ask_volume_3;mid_price;profit_and_loss
+  trades_round_2_day_{-1, 0, 1}.csv
+    Schema: timestamp;buyer;seller;symbol;currency;price;quantity
+
+Run everything in pandas. The checklist below is ordered from cheapest /
+most revealing to most expensive / most speculative.
+
+3.1 DATA HYGIENE (do this before any stat)
+    - Drop rows with mid_price == 0 (empty book). Keep a counter so you
+      know how many ticks you discarded per product per day.
+    - Sort by (day, timestamp). Reset index.
+    - Check for duplicates on (day, timestamp, product) - there should be
+      at most one row each; duplicates usually indicate parsing issues.
+    - Compute ACTUAL tick spacing: `df.groupby("day")["timestamp"].diff()
+      .describe()` - should mostly be 100.
+    - Always analyze PER (product, day) first, then pool across days only
+      after you have seen per-day numbers.
+
+3.2 UNIVARIATE (PER PRODUCT, PER DAY)
+    - Mid level: mean, median, std, min, max.
+    - Returns: r_t = mid_t - mid_{t-1}. Report std, skew, extremes, and
+      the fraction of |r_t| > 3 ticks.
+    - Lag-1 autocorrelation of returns: the single most informative stat
+      for whether to MM or trend-follow.
+    - Detrended std: subtract a rolling mean (e.g. 200-tick) or a linear
+      time trend, then std. For pepper-like products this is MUCH smaller
+      than raw std and tells the real tick-noise story.
+    - Rolling std of returns (window 100-500): shows vol regimes.
+
+3.3 MICROSTRUCTURE
+    - Quoted spread (ask1 - bid1) distribution: mean, median, p10, p90.
+      Plot a histogram - a bimodal shape (tight + wide) means two
+      regimes, and you may want conditional quoting.
+    - Depth at L1, L1+L2, L1+L2+L3 (sum of volumes). Mean and by-day.
+    - Microprice - mid distribution: shows how often the book is heavily
+      one-sided.
+    - Imbalance distribution.
+
+3.4 TREND VS NOISE
+    - Fit mid ~ a + b * timestamp per (product, day). Report slope b
+      (ticks per timestamp) and residual std. Large slope + small resid
+      std = steady drift (e.g. pepper).
+    - Plot residuals - they should look stationary if your detrending
+      is adequate.
+
+3.5 CROSS-ASSET (OSMIUM vs PEPPER, or any pair / basket you have)
+    - Pivot to wide form on (day, timestamp), keep only rows where both
+      mids > 0.
+    - Pooled correlation AND per-day correlation. Sign flips between
+      days are a red flag for any fixed pair trade.
+    - Rolling correlation (window 500-2000 ticks). Report min/max/mean
+      of the rolling series.
+    - OLS hedge ratio: y = a + b * x. Report b, a, residual std.
+    - AR(1) on residuals: phi and half-life.
+    - ADF on residuals (statsmodels.tsa.stattools.adfuller): watch
+      p-value but do not treat it as decisive on 3 days of data.
+    - Lead-lag: cross-correlation of RETURNS at lags -5..+5. Rarely
+      strong in Prosperity, but worth a check.
+
+3.6 BASKET-STYLE ANALYSIS (applicable when a basket exists)
+    - Build synthetic = sum of w_i * P_i using either the nominal recipe
+      or OLS-fitted weights.
+    - spread = basket - synthetic. Plot, histogram, rolling mean, rolling
+      std.
+    - z-score with (mean, std) computed online using a rolling window.
+      Try both small (50-200) and large (1000-2000) windows and see
+      which produces cleaner signals.
+    - Compare two-way: also price components from basket and check
+      residual structure.
+
+3.7 TRADES FILE
+    - Volume per hour (or per 10k timestamps) per product.
+    - Distribution of trade size.
+    - Merge on (timestamp, symbol) with prices to get trade_price minus
+      contemporaneous mid. Most trades should be inside the spread;
+      significant "through the spread" volume indicates informed flow.
+    - Imbalance of buyer vs seller (if the CSV exposes counterparties).
+
+3.8 VISUALIZATION PATTERNS THAT PAY OFF
+    - Mid vs time, one panel per day. Catches spikes, zero-mid ticks,
+      day-boundary drift.
+    - Histogram of quoted spread per product.
+    - Scatter of product_A mid vs product_B mid, colored by day.
+    - Rolling correlation series overlaid on the two mids.
+    - For basket style: spread vs time with +/- threshold bands.
+
+3.9 WALK-FORWARD DISCIPLINE
+    - Use day -1 and day 0 for discovery / tuning.
+    - Hold out day 1 as an out-of-sample check.
+    - Rotate holdouts occasionally to see which day is actually
+      representative.
+
+
+================================================================================
+ SECTION 4 - TECHNIQUES DISTILLED FROM PAST WINNERS
+================================================================================
+
+Each entry lists the team, what they did, why it worked, and how to adapt
+it to any Round 2 setup (pair, basket, or cross-exchange).
+
+4.1 Two-way synthetic pricing
+    Sources: Martin Oravec (P3), TimoDiehm (P3, 2nd global)
+    Idea: do not only price basket = f(components); also price each
+    component = g(basket, other_components). Both sides cross-check and
+    produce more trading opportunities.
+    Adapt: when you have any composite asset, write two fair functions
+    and reconcile them. Trade whichever leg has the larger z.
+
+4.2 Modified z-score with small rolling window
+    Source: Linear Utility / ericcccsliu (P2, 2nd global)
+    Idea: anchor the mean to a fundamental (historical average basket
+    premium) but compute std on a SMALL rolling window. When vol
+    compresses, z spikes even at modest deviations, catching reversion
+    near local extrema.
+    Adapt: in any spread strategy, try fixed-mean-rolling-std alongside
+    the classic rolling-mean-rolling-std z-score.
+
+4.3 Scaled position sizing via a continuous score
+    Source: Johnny Tung (top 2.5% P3)
+    Idea: rather than binary "short when z > 1.5", compute a continuous
+    long_index and scale position linearly up to the position limit.
+    Smoother PnL, fewer whipsaws near thresholds.
+    Adapt: your inventory TARGET can be a smooth function of spread /
+    slope / imbalance.
+
+4.4 OLS-fitted weights instead of nominal recipe
+    Source: CarterT27 (9th global, P3)
+    Idea: even if the basket is specified as "6 A + 3 B + 1 C", market
+    behavior may follow a slightly different effective weighting. Fit
+    w by OLS on historical data; spread using fitted w.
+    Adapt: always compare "nominal synthetic" and "OLS synthetic"
+    residual std; use whichever is smaller (and stationary).
+
+4.5 Monte Carlo / data augmentation for parameter tuning
+    Source: pe049395 (Rank 13, P2)
+    Idea: simulate many perturbed histories from the observed data to
+    avoid overfitting thresholds to one or two days.
+    Adapt: if tuning z-thresholds, resample / bootstrap the time series
+    and tune to robust medians instead of one run's max.
+
+4.6 Hardcoded fundamental mean + local std
+    Source: Linear Utility
+    Reasoning given: "there should be a fundamental reason behind the
+    mean of spread; the volatility each day is less predictable." So
+    separate the two.
+    Adapt: if you know the long-run fair (e.g. Osmium ~ 10,001), DO
+    hardcode it; then estimate only vol online.
+
+4.7 Trade timing near local extrema
+    Source: Linear Utility
+    Idea: hitting +/- z thresholds often happens just before reversion;
+    backtest where on the distribution your fills land and place
+    thresholds so you are closer to extrema even at the cost of fewer
+    trades.
+    Adapt: report fill histograms in your backtest, not just total PnL.
+
+4.8 Correlation gate for pairs overlay
+    Source: our own Round 2 work
+    Idea: enable pairs/spread overlay only when online rolling correlation
+    of returns exceeds a threshold; damp it when correlation is weak or
+    flipping. Prevents the overlay from destroying PnL in uncorrelated
+    regimes.
+    Adapt: always gate optional overlays on a live stability test.
+
+4.9 Trend-aware market making
+    Source: our own pepper strategy (and implied in many P2 writeups)
+    Idea: for a drifting product, compute slope, shift fair by
+    slope * forecast_horizon, and set inventory target biased in the
+    trend direction. Keep tight quotes on the trend-friendly side and
+    wider quotes on the fighting side.
+    Adapt: use fast/slow EMA and an EWMA of the slope, not a raw diff.
+
+4.10 Ornstein-Uhlenbeck MM with execution probability
+    Source: pe049395 (P2)
+    Idea: model dS = theta (mu - S) dt + sigma dW; size quotes by
+    expected utility = (edge + inventory_risk_adjustment) * P(fill),
+    where P(fill) is a Poisson function of quote distance.
+    Adapt: overkill for most teams, but the "expected utility per quote"
+    framework is worth internalizing.
+
+
+================================================================================
+ SECTION 5 - ROUND 2 SPECIFIC NOTES FOR THIS WORKSPACE
+================================================================================
+
+Confirmed observations from ROUND2/prices_round_2_day_*.csv:
+
+  Products (only two appear in the files):
+    - ASH_COATED_OSMIUM
+    - INTARIAN_PEPPER_ROOT
+  No basket / ETF row in the data. No conversion observations file.
+  Therefore: Prosperity 4 Round 2 in this workspace is closer in shape to
+  Prosperity 1 Round 2 (pair-ish) than to Prosperity 3 Round 2 (basket).
+
+  Per-product behavior (after dropping mid == 0):
+    OSMIUM:
+      mean mid ~ 10,000.9
+      full-day std of mid ~ 5
+      200-MA detrended std ~ 3.5
+      median |tick return| = 1
+      lag-1 return autocorrelation ~ -0.50  (strong tick mean reversion)
+      interpretation: pure MR around a near-constant anchor
+
+    PEPPER:
+      mean mid drifts +~1000 per simulated day
+        day -1: ~11k -> ~12k
+        day  0: ~12k -> ~13k
+        day  1: ~13k -> ~14k
+      200-MA detrended std ~ 2.2
+      median |tick return| = 1.5
+      lag-1 return autocorrelation ~ -0.50  (also strong tick MR)
+      interpretation: tick-level MR overlaid on a persistent daily drift
+
+  Paired behavior:
+    global correlation of mids is weak (~ -0.08)
+    correlation is regime-dependent (rolling corr swings in [-0.83, +0.69])
+    OLS residuals are NOT cleanly stationary (ADF p ~ 0.77)
+
+  Implications for strategy design:
+    1. Independent, per-product MM is the dependable edge.
+    2. Osmium -> fair pinned to ~10,001, simple mean-reverting MM.
+    3. Pepper -> fast/slow EMA + slope, trend lean via inventory target,
+       asymmetric edges (tighter on trend-friendly side).
+    4. Pairs overlay is OPTIONAL and MUST be gated on live correlation
+       stability. A static beta-hedge spread trade has historically
+       destroyed PnL in this workspace's backtests.
+
+  Useful benchmarks from earlier work in this repo:
+    - Baseline "simple" trader (ROUND2/Tester/285384.py): ~85k / day.
+    - Current ROUND2/trader.py after tuning: ~94k / day across all 3 days
+      (~282k total over 3 days, see run_bt.py).
+
+
+================================================================================
+ SECTION 6 - PITFALLS TO AVOID
+================================================================================
+
+6.1 Overfitting to 3 days
+    - If a threshold improves day 0 PnL by 5k but hurts day 1 by 7k,
+      you are overfitting. Prefer configurations that are monotone
+      across days.
+
+6.2 Fixed hedge ratios without stationarity evidence
+    - A "pair" can have b = -14 or +1 across different windows here.
+    - Always report AR(1) phi and ADF p on residuals BEFORE trading a
+      spread, and be willing to skip the overlay if they are bad.
+
+6.3 Look-ahead bias
+    - Any feature you compute in a notebook must only use data <= t
+      at time t if you plan to implement it live. Rolling windows
+      without `closed="left"` are a classic mistake.
+
+6.4 Drift vs volatility confusion
+    - Pepper's full-day std (~290) is DRIFT, not tick noise. Use
+      detrended std (~2.2) when sizing edges and inventory.
+
+6.5 Stitching days without day boundaries
+    - Concatenating CSVs and computing returns across the join creates
+      a fake massive move. Keep `day` in the index; compute stats per
+      day then aggregate.
+
+6.6 Chasing the last signal
+    - Each round only has a few days of data. Sophisticated models
+      rarely beat disciplined MM + inventory control. The second-place
+      Prosperity 2 team literally said "the only thing that mattered
+      for profitability here was the distance between the trade price
+      and the true fair." Keep that in mind before adding complexity.
+
+6.7 Trusting a single number
+    - Pooled correlation, pooled ADF, pooled std - all can lie when
+      regimes switch. Always break out per-day.
+
+6.8 Backtest != live
+    - Expect ~10-20% PnL haircut in live competition vs your backtest.
+      Do not submit a config that only just barely wins locally.
+
+
+================================================================================
+ SECTION 7 - REFERENCES
+================================================================================
+
+Winner / public writeups referenced in this document:
+
+  TimoDiehm (2nd global, Prosperity 3)
+    https://github.com/TimoDiehm/imc-prosperity-3
+
+  Linear Utility / ericcccsliu (2nd global, Prosperity 2)
+    https://github.com/ericcccsliu/imc-prosperity-2
+
+  pe049395 (13th global, Prosperity 2)
+    https://github.com/pe049395/IMC-Prosperity-2024
+
+  nicolassinott (91st, Prosperity 1)
+    https://github.com/nicolassinott/IMC_Prosperity
+
+  CarterT27 (9th global, Prosperity 3)
+    https://github.com/CarterT27/imc-prosperity-3
+
+  Johnny Tung (top 2.5%, Prosperity 3)
+    https://medium.com/@johnnya12399/how-we-ranked-top-2-globally-in-imc-prosperity-2025-our-algorithmic-trading-strategy-957377749621
+
+  Martin Oravec (Prosperity 3 writeup)
+    https://medium.com/@oravec.martin01/imc-prosperity-3-be859180f133
+
+  Matius Chong (Prosperity 3 writeup)
+    https://medium.com/@matius_chong/imc-prosperity-3-challenge-2025-2af2a7a4132b
+
+  David Teather (Prosperity 2 writeup)
+    https://dteather.com/blogs/imc-prosperity-2
+    https://medium.com/@davidteather/imc-prosperity-2-b1c94b1ebba8
+
+  hochfilzer (Prosperity 2)
+    https://github.com/hochfilzer/prosperity2
+
+  AcreixYuan (Prosperity 2)
+    https://github.com/AcreixYuan/IMC-Prosperity-2
+
+  gabsens Prosperity 2 manual writeups
+    https://github.com/gabsens/IMC-Prosperity-2-Manual
+
+Related workspace files worth re-reading:
+
+  ROUND2/trader.py                    current algorithm
+  ROUND2/analyze_round2_data.py       offline data analysis script
+  ROUND2/notebooks/analysis.ipynb     exploratory notebook
+  ROUND2/prices_round_2_day_*.csv     price books
+  ROUND2/trades_round_2_day_*.csv     trade prints
+  ROUND1/trader.py                    previous round's algorithm
+
+================================================================================
+ END OF FILE
+================================================================================

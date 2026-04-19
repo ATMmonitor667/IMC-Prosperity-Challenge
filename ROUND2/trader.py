@@ -10,29 +10,15 @@ LIMIT = {
     PEPPER: 80
 }
 
-OSMIUM_FAIR = 10_000.9
-OSMIUM_EDGE = 7
-OSMIUM_EDGE_FAR = 12
-OSMIUM_SIZE_NEAR = 60
-OSMIUM_SIZE_FAR = 20
-OSMIUM_SKEW_DENOM = 40
-OSMIUM_MICRO_CAP = 0.5
-OSMIUM_TAKE_SLOP = 1
-#----------------------
-PEPPER_FAIR = 12500
-PEPPER_FAST_ALPHA = 0.35
-PEPPER_SLOW_ALPHA = 0.05
-PEPPER_SLOPE_ALPHA = 0.04
-PEPPER_PRIOR_SLOPE = 0.0
-PEPPER_FORECAST_TS_BASE = 800
-PEPPER_FORECAST_TS_MAX = 1500
-PEPPER_BID_EDGE_BASE = 3
-PEPPER_ASK_EDGE_BASE = 4
-PEPPER_SKEW_DENOM = 16
 class Trader:
     def __init__(self, state: TradingState):
+        self.EMA: list[float] = []
+        self.alpha: float = 0.02
+        self.midPrice: list[float] = []
+        self.orders: list[Order] = []
         
-        pass
+        
+    
     def get_position(self, product:str, state: TradingState) -> int:
         return state.position.get(product, 0)
     
@@ -55,12 +41,53 @@ class Trader:
             return 0
     def get_ema(self, product:str, state: TradingState) -> float:
         if product == OSMIUM:
+            pass
+    def total(self, state: TradingState, symbol: str) -> List[Order]:
+        orders: List[Order] = []
+        if symbol == PEPPER:
+            orders = self.pepper_Strategy(state, symbol)
+        elif symbol == OSMIUM:
+            orders = self.osmium_Strategy(state, symbol)
+        return orders
+    def microPrice(self, state: TradingState, symbol: str) -> float:
+        bid = state.order_depths[symbol].buy_orders
+        ask = state.order_depths[symbol].sell_orders
+        best_bid = max(bid.keys())
+        best_ask = min(ask.keys())
+        depth = state.order_depths[symbol]
+        bid_volume = sum(depth.buy_orders.values())
+        ask_volume = sum(depth.sell_orders.values())
+        if bid_volume > 0 and ask_volume > 0:
+            return (bid_volume * best_bid + ask_volume * best_ask) / (bid_volume + ask_volume)
+        elif bid_volume > 0:
+            return best_bid
+        elif ask_volume > 0:
+            return best_ask
+        else:
+            return 0
+    def EMA(self, price: float, alpha: float) -> float:
+        return alpha * price + (1 - alpha) * self.EMA(price, alpha)
+
+    def pepper_Strategy(self, state: TradingState, symbol: str) -> List[Order]:
+        bid = state.order_depths[symbol].buy_orders
+        ask = state.order_depths[symbol].sell_orders
+        best_bid = max(bid.keys())
+        best_ask = min(ask.keys())
+        mid = (best_bid + best_ask) / 2.0
+        
+        
+            
+        
             
     
     def run(self, state: TradingState) -> Tuple[Dict[str, List[Order]], int, str]:
+        self.orders = []
         for product, order_depth in state.order_depths.items():
             position = self.get_position(product, state)
-            
+            order_buy = state.order_depths[product].buy_orders
+            order_sell = state.order_depths[product].sell_orders
+            best_bid = max(order_buy.keys())
+            pass
             
         
         
