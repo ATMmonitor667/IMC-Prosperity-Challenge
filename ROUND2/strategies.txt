@@ -1,0 +1,368 @@
+================================================================================
+ ROUND 2 - FIVE TRADING ALGORITHMS (DESCRIPTIONS ONLY)
+================================================================================
+
+Purpose:
+  Five algorithms ordered from easiest to hardest. Each one is described in
+  plain English, end-to-end, so you can implement and backtest it yourself.
+  No code in this file - only the recipe. Per-algorithm scores:
+
+    Complexity X/100  - how hard it is to implement and tune correctly.
+    ROI X/100         - subjective likelihood that, after honest tuning,
+                        it produces real positive PnL on the Round 2 data
+                        (NOT a forecast of dollar return).
+
+Products in scope (matches ROUND2/trader.py):
+  - OSMIUM = "ASH_COATED_OSMIUM"   (mid pinned near 10,001, strong tick-level
+                                    mean reversion, very small std)
+  - PEPPER = "INTARIAN_PEPPER_ROOT" (drifts ~+1000 per simulated day, locally
+                                    small detrended std, also mean-reverts
+                                    around the local trend)
+Position limits:
+  LIMIT[OSMIUM] = 80, LIMIT[PEPPER] = 80
+Order book reminder (datamodel.py):
+  state.order_depths[symbol].buy_orders   -> Dict[price:int, qty:int] (bid)
+  state.order_depths[symbol].sell_orders  -> Dict[price:int, qty:int] (ask)
+  Ask quantities can be NEGATIVE in this engine - always use abs() on size.
+
+Persistence:
+  The engine returns and re-feeds traderData (a string). Encode any state you
+  want to keep across calls (EMAs, rolling stats, mode flags) as JSON, decode
+  at the start of run(), update through the call, and JSON-encode it back at
+  the end.
+
+Definitions used throughout:
+  best_bid       = max(buy_orders.keys())  if buy_orders else None
+  best_ask       = min(sell_orders.keys()) if sell_orders else None
+  mid            = (best_bid + best_ask) / 2
+  size_at_bid    = buy_orders[best_bid]
+  size_at_ask    = abs(sell_orders[best_ask])
+  fair           = your model's "true price" estimate (varies per algo)
+  half_spread s  = how far from fair you post quotes
+  position p     = state.position.get(symbol, 0)  (long > 0, short < 0)
+  capacity_buy   = LIMIT[symbol] - p              (max you can still buy)
+  capacity_sell  = LIMIT[symbol] + p              (max you can still sell)
+
+
+================================================================================
+ ALGORITHM 1 - STATIC QUOTE MARKET MAKING (BASELINE)
+================================================================================
+Complexity: 15/100
+ROI:        60/100
+
+Idea:
+  Earn the bid-ask spread by sitting on both sides at a fixed distance from
+  the mid. No memory, no skew. The dumbest version that still works.
+
+Inputs per tick (per product):
+  - best_bid, best_ask, mid (skip the product if either side is empty).
+  - position p.
+
+Persisted state:
+  None.
+
+Procedure (per product, each call to run):
+  1. Compute mid = (best_bid + best_ask) / 2.
+  2. Bid price  = floor(mid) - s   (or round(mid - s) - your choice, be
+                                   consistent; ints are required by Order).
+     Ask price  = ceil(mid)  + s   (or round(mid + s)).
+  3. Bid size   = min(q, capacity_buy)   (0 if non-positive -> skip bid).
+     Ask size   = min(q, capacity_sell)  (0 if non-positive -> skip ask).
+  4. Emit one BUY Order(symbol, bid_price, +bid_size) and one SELL
+     Order(symbol, ask_price, -ask_size). The IMC engine convention is
+     positive qty for buy orders and negative qty for sell orders.
+
+Parameters (starting values):
+  s_osmium = 1, s_pepper = 2, q = 5.
+
+Edge cases:
+  - One side empty -> only quote the side you can.
+  - position already at +/-LIMIT -> drop the quote that would breach.
+  - Always cast prices to int before constructing Order.
+
+Why it works on this data:
+  Both products spend most of their life in tight ranges, so a +/- s quote
+  around mid will get filled on both sides over time and capture spread.
+
+Apply to:
+  Both products independently.
+
+
+================================================================================
+ ALGORITHM 2 - EMA FAIR + INVENTORY-SKEWED QUOTING
+================================================================================
+Complexity: 30/100
+ROI:        70/100
+
+Idea:
+  Same skeleton as Algorithm 1, but replace mid with a smoothed fair (EMA),
+  and shift both quotes against your inventory so a long position naturally
+  attracts sells (and a short position naturally attracts buys).
+
+Inputs per tick:
+  - best_bid, best_ask, mid as before.
+  - position p, LIMIT.
+
+Persisted state (in traderData JSON):
+  - ema[symbol]: float           (None until warmed up)
+  - n_seen[symbol]: int          (count of mids observed)
+
+Per-tick procedure (per product):
+  1. Update EMA:
+       alpha = 2 / (N + 1)
+       if ema is None: ema = mid
+       else:           ema = alpha * mid + (1 - alpha) * ema
+       Warm-up gate: until n_seen >= N, fall back to mid for the fair.
+  2. fair = ema (or mid during warm-up).
+  3. Inventory skew shift:
+       skew = -k * (p / LIMIT) * s
+     (Long  -> negative shift -> both quotes move down -> easier to sell.
+      Short -> positive shift -> both quotes move up   -> easier to buy.)
+  4. Bid price = round(fair + skew - s)
+     Ask price = round(fair + skew + s)
+  5. Sizes: bid_size = min(q, capacity_buy), ask_size = min(q, capacity_sell).
+  6. Emit Order objects with the IMC sign convention from Algorithm 1.
+
+Parameters:
+  Osmium: N = 20, s = 1, k = 1.0, q = 5.
+  Pepper: N = 50, s = 2, k = 1.0, q = 5.
+
+Edge cases:
+  - Warm-up: avoid trading until you have a stable EMA.
+  - Clip skew so |skew| <= s (so quotes never cross the fair).
+  - Re-encode ema and n_seen back into traderData every tick.
+
+Apply to:
+  Both products. Pepper benefits from the slower N because of its drift.
+
+
+================================================================================
+ ALGORITHM 3 - MICROPRICE + AGGRESSIVE TAKE-THEN-MAKE
+================================================================================
+Complexity: 45/100
+ROI:        65/100
+
+Idea:
+  Use top-of-book size to estimate a microprice fair. If the resting book has
+  prices that are clearly worse than fair (an ask below fair or a bid above
+  fair), AGGRESS first to take that edge, then post passive quotes with the
+  capacity you still have.
+
+Inputs per tick:
+  - Full top-of-book: best_bid, size_at_bid, best_ask, size_at_ask
+    (use abs on ask size).
+  - position p, LIMIT.
+
+Persisted state:
+  Optional: a single previous fair to compute a delta if you want to throttle
+  flips. Not strictly required.
+
+Microprice (top-of-book, size-weighted):
+  micro = (size_at_ask * best_bid + size_at_bid * best_ask)
+          / (size_at_bid + size_at_ask)
+  Note the cross-weights: heavier ask side pulls the fair DOWN toward bid
+  (because someone is leaning hard to sell), and vice versa.
+  If one side is empty, fall back to the other side's price; if both empty,
+  skip the product.
+
+Per-tick procedure (per product):
+  1. fair = micro.
+  2. TAKE step:
+       a. If best_ask <= fair - take_edge:
+            qty = min(size_at_ask, capacity_buy, q_take)
+            Emit BUY Order(symbol, best_ask, +qty); update capacity_buy.
+       b. If best_bid >= fair + take_edge:
+            qty = min(size_at_bid, capacity_sell, q_take)
+            Emit SELL Order(symbol, best_bid, -qty); update capacity_sell.
+       c. (Optional: walk a few price levels deeper while the inequality
+          still holds; cap by remaining capacity.)
+  3. MAKE step:
+       Bid price = round(fair) - s
+       Ask price = round(fair) + s
+       Sizes:    bid_size = min(q_make, capacity_buy)
+                 ask_size = min(q_make, capacity_sell)
+       Emit the two passive orders if size > 0.
+
+Parameters:
+  Osmium: take_edge = 1, s = 1, q_take = 10, q_make = 5.
+  Pepper: take_edge = 2, s = 2, q_take = 10, q_make = 5.
+
+Edge cases:
+  - Always update capacity_buy / capacity_sell after a take order so the
+    make step doesn't oversize.
+  - If take edge is 0 you will lift/hit constantly - keep take_edge > 0.
+  - If best_bid >= best_ask (locked or crossed book), skip making.
+
+Why it works on this data:
+  Osmium's strong tick-level mean reversion means a price that ticks too far
+  from fair gets paid back quickly. This algo monetizes that directly.
+
+Apply to:
+  Strongest fit on Osmium. Works on Pepper too with a slightly larger
+  take_edge.
+
+
+================================================================================
+ ALGORITHM 4 - MEAN-REVERSION Z-SCORE WITH DRIFT HANDLING
+================================================================================
+Complexity: 60/100
+ROI:        60/100
+
+Idea:
+  Treat each product as a noisy mean-reverter around a (possibly moving)
+  baseline. Compute a z-score and trade against extremes. For Pepper,
+  detrend with a slow EMA so the daily drift doesn't make z permanently
+  positive or negative.
+
+Inputs per tick:
+  - mid for each product.
+  - position p.
+
+Persisted state (per product, in traderData):
+  - For Osmium (no drift):
+      mu, var (or M2 + count) updated by Welford or EWMA on raw mid.
+  - For Pepper (drifting):
+      slow_ema       (length L_slow ~ 500)
+      mu_resid, var_resid on residual = mid - slow_ema (length W_fast ~ 200)
+
+Recursive update options:
+  - Welford (rolling window of last W mids): exact mean/var, more bookkeeping.
+  - EWMA (preferred, O(1) memory):
+      mu_t   = a * x_t + (1 - a) * mu_{t-1}
+      var_t  = (1 - a) * (var_{t-1} + a * (x_t - mu_{t-1})^2)
+      sigma  = sqrt(var)
+
+Per-tick procedure (per product):
+  1. Compute the value to z-score:
+       Osmium: x = mid;                           series = x
+       Pepper: slow_ema updated as in Algorithm 2 with L_slow;
+               residual = mid - slow_ema;        series = residual
+  2. Update mu and sigma on the chosen series with EWMA constants
+       a_mu  = 2 / (W_fast + 1)
+       a_var = a_mu
+  3. If sigma is below sigma_min (warm-up or flat), do nothing.
+  4. z = (series - mu) / sigma.
+  5. Target signed position:
+       if z > z_in:   target = -q_max * min(|z|, z_max) / z_max
+       if z < -z_in:  target = +q_max * min(|z|, z_max) / z_max
+       if |z| < z_out: target = 0
+       else:           target = previous target (hysteresis - keep mode)
+  6. Required trade qty = target - p, then cap by capacity_buy/sell.
+  7. Execute as marketable orders against best_ask (to buy) or best_bid (to
+     sell). Optionally split into a take-half-and-make-half version: take up
+     to half the qty at touch and place the rest as a passive limit one tick
+     better.
+
+Parameters:
+  W_fast = 200, L_slow = 500 (Pepper only),
+  z_in = 1.5, z_out = 0.3, z_max = 3.0, q_max = 20,
+  sigma_min = 0.5.
+
+Edge cases:
+  - sigma -> 0 makes z explode; clamp with sigma_min.
+  - Avoid flipping on every tick: hysteresis (z_in vs z_out) and keep target
+    in traderData so you only re-enter on a fresh signal.
+  - During warm-up (n_seen < W_fast or L_slow), do not trade.
+
+Apply to:
+  Both products with the per-product variant above. This is the first algo
+  here that takes directional risk, so size carefully.
+
+
+================================================================================
+ ALGORITHM 5 - ONLINE PAIR / SPREAD OVERLAY WITH STABILITY GATE
+================================================================================
+Complexity: 80/100
+ROI:        45/100  (overlay only; pair correlation is unstable in this data)
+
+Idea:
+  Run Algorithm 2 (or 3) as the BASE on each product. On top, add a pair
+  overlay that trades the spread between OSMIUM and PEPPER, but ONLY when
+  the recent correlation is strong enough. This is high-complexity and the
+  ROI is rated lower because round2_concepts.txt notes the pair relationship
+  is not stably cointegrated; the gate is what saves it.
+
+Inputs per tick:
+  - Mid of OSMIUM and PEPPER.
+  - Positions in both.
+
+Persisted state (in traderData):
+  - rolling buffers (or EWMA estimates) of:
+      mid_o, mid_p, mid_o*mid_p, mid_o^2, mid_p^2  (window W = 300)
+  - From those: rho (Pearson), beta (OLS slope of OSMIUM on PEPPER).
+  - Spread series stats: mu_spread, sigma_spread (also EWMA, W_spread ~ 200).
+  - mode flag: "flat" | "long_spread" | "short_spread" | "blocked".
+
+Per-tick procedure:
+  1. Update rolling estimators with the new mids.
+  2. Compute rho. If |rho| < rho_min:
+       set mode = "blocked", flatten any overlay legs gradually, and skip
+       to step 6 (still let the base algo quote).
+  3. Compute beta = Cov(O, P) / Var(P).
+     Compute spread = mid_o - beta * mid_p.
+     Update mu_spread, sigma_spread.
+  4. z_spread = (spread - mu_spread) / sigma_spread.
+  5. Decide the overlay action:
+       if mode in ("flat","blocked") and z_spread > +z_in:
+           mode = "short_spread"   (short OSMIUM, long beta-units of PEPPER)
+       if mode in ("flat","blocked") and z_spread < -z_in:
+           mode = "long_spread"    (long  OSMIUM, short beta-units of PEPPER)
+       if mode != "flat" and |z_spread| < z_out:
+           mode = "flat"           (close the overlay legs)
+  6. Translate mode into target overlay positions:
+       q_o_overlay, q_p_overlay both bounded by q_pair and by remaining
+       LIMIT after the base algo's intended fills. Round PEPPER leg to
+       int(round(beta * q_o_overlay)).
+  7. Send orders to move CURRENT positions toward (base_target + overlay_target)
+     for each product. Use marketable orders for overlay entries/exits to
+     ensure the legs stay paired; the base algo continues to provide the
+     resting liquidity.
+
+Parameters:
+  W = 300, W_spread = 200, rho_min = 0.6,
+  z_in = 1.8, z_out = 0.4, q_pair = 10.
+
+Edge cases:
+  - Always recompute rho BEFORE acting; if it drops mid-trade, set mode to
+    "blocked" and unwind, do not flip directly.
+  - beta can be noisy; clamp to a sane range (e.g. 0.05 to 20) to avoid
+    pathological hedge sizes.
+  - Persist mode in traderData so you don't oscillate every tick.
+  - LIMIT is per product; ensure overlay never pushes either leg over the
+    cap (use min(...) with capacity).
+
+Apply to:
+  OSMIUM and PEPPER together, ON TOP of Algorithm 2 (or 3) running per
+  product. Treat the overlay as optional alpha; it must not break the base.
+
+
+================================================================================
+ BACKTESTING CHECKLIST
+================================================================================
+
+Datasets (in this folder):
+  - prices_round_2_day_-1.csv
+  - prices_round_2_day_0.csv
+  - prices_round_2_day_1.csv
+  - trades_round_2_day_-1.csv  (sample of executed trades)
+
+Suggested workflow:
+  1. Implement Algorithm 1 first; confirm it doesn't blow up and gets fills.
+  2. Add Algorithm 2 (EMA + skew); compare PnL and inventory profile.
+  3. Add Algorithm 3 (microprice + take-then-make); evaluate on Osmium first.
+  4. Add Algorithm 4 (z-score) per product; tune z_in/z_out and W_fast.
+  5. Try Algorithm 5 as an overlay on top of Algorithm 2 - measure
+     INCREMENTAL PnL versus base alone; keep only if it adds real edge.
+
+Metrics to record per algo per day:
+  - Total PnL (signed).
+  - Mean and max abs inventory.
+  - Max drawdown (intraday).
+  - Number of fills, fill rate (orders submitted vs filled).
+  - Spread captured per fill (estimate).
+
+Tuning protocol:
+  - Tune parameters on day -1 and day 0 only.
+  - Validate (no further tuning) on day 1.
+  - If an algo only works on the tuning days but breaks on day 1, it is
+    overfit - prefer a simpler algo that holds up across all three days.
