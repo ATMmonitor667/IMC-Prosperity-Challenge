@@ -1,0 +1,121 @@
+================================================================================
+ ROUND 2 TRADER — ITERATION LOG (data-driven changes + learnings)
+================================================================================
+Format: iteration number, change summary, backtest result, what we learned.
+
+
+--------------------------------------------------------------------------------
+ITERATION 0 — BASELINE (before this log)
+--------------------------------------------------------------------------------
+Command:
+  cd ROUND2 && python -m prosperity4bt trader.py 2 --data bt_data --merge-pnl --no-out --no-progress
+
+Approximate result (from prior session):
+  Total PnL ~303,461; merged Sharpe very large (~150+).
+
+Learning — why "Sharpe" looks absurdly high:
+  prosperity4bt --merge-pnl reports Sharpe on the MERGED series of *daily*
+  PnL totals (here: only 3 days). When three days have similar total profit
+  and low day-to-day variance, sample std of [day1, day2, day3] is tiny, so
+  mean/std explodes. That is NOT the same as a 252-day annualized equity
+  curve Sharpe. Treat it as a diagnostic of consistency across days, not as
+  a fund-grade risk metric. Lowering this number by "tuning the bot" is
+  misleading; the fix is interpretive (more days, or intraday PnL series).
+
+
+--------------------------------------------------------------------------------
+ITERATION 1 — OFFLINE DATA ANALYSIS (CSV mids, top-of-book)
+--------------------------------------------------------------------------------
+Script: load mid = (bid1+ask1)/2 per timestamp from prices_round_2_day_*.csv
+
+Pepper (INTARIAN_PEPPER_ROOT), all three days:
+  - Total mid range ~ +1000 per day (strong drift).
+  - Per-tick return mean ~ +0.108, std ~ 1.75–2.03.
+  - Lag-1 autocorrelation of returns ~ -0.49 to -0.50 (same order as Osmium:
+    strong tick-level mean reversion ON TOP of slow drift).
+
+  Time from session open until cumulative mid move exceeds K (ticks):
+    K=5  -> ~22–28 ticks
+    K=8  -> ~28–86 ticks (day -1 slower early grind)
+    K=10 -> ~68–96 ticks
+
+  With correct dual gate (delta < -10 AND fast_ewma < -0.03), no spurious
+  SHORT lock in the first 200 ticks on any of the three days.
+
+Learning:
+  Pepper is not "pure random walk up"; locally it mean-reverts. Any policy
+  that only chases drift without respecting short-horizon MR leaves money
+  from buying high / selling low. Osmium-style lag-1 tilt is justified for
+  Pepper too, once we are in directional mode.
+
+
+--------------------------------------------------------------------------------
+ITERATION 2 — PEPPER: faster DIRECTION LOCK (cumret threshold)
+--------------------------------------------------------------------------------
+Change:
+  PEPPER_CUMRET_LOCK: 10.0 -> 7.0
+  (Still requires fast_drift same sign past PEPPER_FAST_DRIFT_LOCK; warmup
+   unchanged.)
+
+Rationale:
+  Analysis shows first valid LONG lock happens at ticks 68–96 with threshold
+  10; lowering to 7 moves first lock to ~tick 51–71 on day 0/1 and ~71 on day -1,
+  recovering tens of ticks of full-size long exposure on a +0.108/tick drift.
+
+Learning (superseded by Iter 3 ablation):
+  First implementation bundled cumret=7 with MR=0.35 in one step; net PnL
+  dropped vs baseline until ablation separated the two effects (Iter 3).
+
+
+--------------------------------------------------------------------------------
+ITERATION 3 — PEPPER: MEAN-REVERSION TILT in locked long/short legs
+--------------------------------------------------------------------------------
+Change:
+  Store pepper_last_ret each tick in _pepper_strategy.
+  In _pepper_long_only / _pepper_short_only, shift effective fair by
+    -PEPPER_MR_WEIGHT * last_return (lag-1 MR; CSV lag-1 ac ~ -0.49).
+
+  Tried PEPPER_MR_WEIGHT = 0.35.
+
+Backtest (merge-pnl):
+  Total PnL: 302,735  (worse than MR-off ablation below)
+
+Ablation (same code path, only constants changed):
+  cumret_lock=7,  MR=0.0   -> Total 303,792  Pepper 241,660  sharpe 138.5
+  cumret_lock=8,  MR=0.0   -> Total 303,792  (same as 7 on this data: fast_drift
+                            gate binds first on some days)
+  cumret_lock=10, MR=0.35 -> Total 302,406  (MR hurts when cumret is high)
+  cumret_lock=7,  MR=0.2  -> Total 302,997
+  cumret_lock=7,  MR=0.5  -> Total 302,992
+
+Learning:
+  Pepper has strong lag-1 MR in the MID series, but our *execution* fair is
+  microprice + multi-level takes; shading fair by last mid return added
+  noise vs edge on the backtester (fills did not improve). The winning knob
+  was earlier DIRECTION LOCK (cumret 7) with MR disabled.
+
+  "Lower Sharpe" co-occurred with higher PnL in ablation (138 vs 145) only
+  because day-total variance changed slightly — still not economically
+  meaningful with n=3 days.
+
+
+--------------------------------------------------------------------------------
+ITERATION 4 — FINAL PICK (ship)
+--------------------------------------------------------------------------------
+Change:
+  PEPPER_CUMRET_LOCK = 7.0
+  PEPPER_MR_WEIGHT   = 0.0   (pepper_last_ret kept for future MR experiments)
+
+Backtest (merge-pnl, 3 days):
+  Total PnL: 303,792  (+331 vs ~303,461 baseline with cumret 10, MR off)
+  Day -1: 100,421  (Osmium 20,401 + Pepper 80,020)
+  Day  0: 101,649  (Osmium 21,450 + Pepper 80,199)
+  Day  1: 101,722  (Osmium 20,281 + Pepper 81,441)
+  Pepper sum: 241,660
+  sharpe_ratio: 138.53  (lower than ~145–151 only because 3 daily totals moved;
+                         still not a meaningful “risk” number — see Iter 0)
+
+
+================================================================================
+ (end of log — append new iterations below)
+================================================================================

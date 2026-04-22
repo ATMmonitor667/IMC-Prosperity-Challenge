@@ -70,10 +70,11 @@ PEPPER_BUY_TOLERANCE = 2
 PEPPER_SELL_EDGE = 4
 
 PEPPER_LOCK_WARMUP = 50
-PEPPER_CUMRET_LOCK = 10.0
+PEPPER_CUMRET_LOCK = 7.0
 PEPPER_FAST_EWMA_LEN = 80.0
 PEPPER_FAST_DRIFT_LOCK = 0.03
 PEPPER_STOPLOSS_REVERSAL = 30.0
+PEPPER_MR_WEIGHT = 0.0
 
 
 HORIZON = 100
@@ -364,6 +365,7 @@ class Trader:
         prev_mid_p = state.get("prev_mid_pepper")
         state["prev_mid_pepper"] = mid
         ret = 0.0 if prev_mid_p is None else mid - float(prev_mid_p)
+        state["pepper_last_ret"] = ret
         alpha = 2.0 / (PEPPER_FAST_EWMA_LEN + 1.0)
         fast_drift = alpha * ret + (1.0 - alpha) * float(
             state.get("fast_drift", 0.0)
@@ -418,6 +420,8 @@ class Trader:
         if best_bid is None or best_ask is None:
             return orders, state
         fair = _microprice(od) or ((best_bid + best_ask) / 2.0)
+        last_ret = float(state.get("pepper_last_ret", 0.0))
+        fair_eff = fair - PEPPER_MR_WEIGHT * last_ret
         limit = LIMIT[PEPPER]
         capacity_buy = limit - position
         capacity_sell = limit + position
@@ -426,7 +430,7 @@ class Trader:
         for ap in sorted(od.sell_orders):
             if capacity_buy <= 0 or remaining <= 0:
                 break
-            if ap > fair + PEPPER_BUY_TOLERANCE:
+            if ap > fair_eff + PEPPER_BUY_TOLERANCE:
                 break
             sz = abs(od.sell_orders[ap])
             qty = min(sz, capacity_buy, remaining)
@@ -439,7 +443,7 @@ class Trader:
         for bp in sorted(od.buy_orders, reverse=True):
             if capacity_sell <= 0 or remaining <= 0:
                 break
-            if bp < fair + PEPPER_SELL_EDGE:
+            if bp < fair_eff + PEPPER_SELL_EDGE:
                 break
             sz = abs(od.buy_orders[bp])
             qty = min(sz, capacity_sell, remaining)
@@ -453,7 +457,7 @@ class Trader:
             if bid_qty > 0:
                 orders.append(Order(PEPPER, int(best_bid), int(bid_qty)))
         if capacity_sell > 0 and position > 0:
-            make_ask = max(int(round(fair)) + PEPPER_SELL_EDGE, best_ask)
+            make_ask = max(int(round(fair_eff)) + PEPPER_SELL_EDGE, best_ask)
             ask_qty = min(PEPPER_MAKE_ASK_SIZE, capacity_sell)
             if ask_qty > 0:
                 orders.append(Order(PEPPER, make_ask, -int(ask_qty)))
@@ -468,6 +472,8 @@ class Trader:
         if best_bid is None or best_ask is None:
             return orders, state
         fair = _microprice(od) or ((best_bid + best_ask) / 2.0)
+        last_ret = float(state.get("pepper_last_ret", 0.0))
+        fair_eff = fair - PEPPER_MR_WEIGHT * last_ret
         limit = LIMIT[PEPPER]
         capacity_buy = limit - position
         capacity_sell = limit + position
@@ -476,7 +482,7 @@ class Trader:
         for bp in sorted(od.buy_orders, reverse=True):
             if capacity_sell <= 0 or remaining <= 0:
                 break
-            if bp < fair - PEPPER_BUY_TOLERANCE:
+            if bp < fair_eff - PEPPER_BUY_TOLERANCE:
                 break
             sz = abs(od.buy_orders[bp])
             qty = min(sz, capacity_sell, remaining)
@@ -490,7 +496,7 @@ class Trader:
             if ask_qty > 0:
                 orders.append(Order(PEPPER, int(best_ask), -int(ask_qty)))
         if capacity_buy > 0 and position < 0:
-            make_bid = min(int(round(fair)) - PEPPER_SELL_EDGE, best_bid)
+            make_bid = min(int(round(fair_eff)) - PEPPER_SELL_EDGE, best_bid)
             bid_qty = min(PEPPER_MAKE_ASK_SIZE, capacity_buy)
             if bid_qty > 0:
                 orders.append(Order(PEPPER, make_bid, int(bid_qty)))
