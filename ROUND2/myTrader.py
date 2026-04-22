@@ -18,10 +18,10 @@ from typing import Dict, List, Tuple
 
 class Trader:
     # Change these to choose which generic algorithm each product uses.
-    # Valid choices: 1, 2, or 3.
-    # Example: OSMIUM_ALGORITHM = 1 and PEPPER_ALGORITHM = 3.
-    OSMIUM_ALGORITHM = 2
-    PEPPER_ALGORITHM = 2
+    # Valid choices: 1, 2, 3, or 4.
+    # Example: OSMIUM_ALGORITHM = 1 and PEPPER_ALGORITHM = 4.
+    OSMIUM_ALGORITHM = 4
+    PEPPER_ALGORITHM = 4
 
     def __init__(self, state=None):
         self.PRODUCTS = {
@@ -35,6 +35,11 @@ class Trader:
         self.orders = []
         self.EMA = {}
         self.n_seen = {}
+        self.sigma = {}
+        self.mu = {}
+        self.slow_ema = {}
+        self.algo4_seen = {}
+        self.algo4_target = {}
         if state is not None:
             for product in state.order_depths:
                 self._ensure_product_state(product)
@@ -47,6 +52,11 @@ class Trader:
     def _ensure_product_state(self, product: str) -> None:
         self.EMA.setdefault(product, None)
         self.n_seen.setdefault(product, 0)
+        self.mu.setdefault(product, None)
+        self.sigma.setdefault(product, None)
+        self.slow_ema.setdefault(product, None)
+        self.algo4_seen.setdefault(product, 0)
+        self.algo4_target.setdefault(product, 0)
 
     def _load_trader_data(self, trader_data: str) -> None:
         if not trader_data:
@@ -59,13 +69,38 @@ class Trader:
             return
         ema = decoded.get("EMA")
         n_seen = decoded.get("n_seen")
+        mu = decoded.get("mu")
+        sigma = decoded.get("sigma")
+        slow_ema = decoded.get("slow_ema")
+        algo4_seen = decoded.get("algo4_seen")
+        algo4_target = decoded.get("algo4_target")
         if isinstance(ema, dict):
             self.EMA.update(ema)
         if isinstance(n_seen, dict):
             self.n_seen.update(n_seen)
+        if isinstance(mu, dict):
+            self.mu.update(mu)
+        if isinstance(sigma, dict):
+            self.sigma.update(sigma)
+        if isinstance(slow_ema, dict):
+            self.slow_ema.update(slow_ema)
+        if isinstance(algo4_seen, dict):
+            self.algo4_seen.update(algo4_seen)
+        if isinstance(algo4_target, dict):
+            self.algo4_target.update(algo4_target)
 
     def _dump_trader_data(self) -> str:
-        return jsonpickle.encode({"EMA": self.EMA, "n_seen": self.n_seen})
+        return jsonpickle.encode(
+            {
+                "EMA": self.EMA,
+                "n_seen": self.n_seen,
+                "mu": self.mu,
+                "sigma": self.sigma,
+                "slow_ema": self.slow_ema,
+                "algo4_seen": self.algo4_seen,
+                "algo4_target": self.algo4_target,
+            }
+        )
 
     def update_EMA(self, product: str, mid: float, alpha: float) -> float:
         self._ensure_product_state(product)
@@ -280,6 +315,105 @@ class Trader:
             orders.append(Order(product, ask_price, -ask_size))
 
         return orders
+    def algorithm_4(self, state: TradingState, product: str) -> List[Order]:
+        product = self._normalize_product(product)
+        if product is None or product not in state.order_depths:
+            return []
+
+        order_depth = state.order_depths[product]
+        best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
+        best_ask = min(order_depth.sell_orders.keys()) if order_depth.sell_orders else None
+        if best_bid is None or best_ask is None:
+            return []
+
+        mid = self.compute_mid(state, product)
+        if mid is None:
+            return []
+
+        self._ensure_product_state(product)
+
+        #==============================================================
+        # Algorithm 4: Mean-Reversion Z-Score with Drift Handling
+        # Osmium uses raw mid. Pepper uses mid minus a slow EMA to remove
+        # its long drift before computing the z-score.
+        #==============================================================
+        W_fast = 200
+        L_slow = 500
+        z_in = 1.5
+        z_out = 0.3
+        z_max = 3.0
+        q_max = 20
+        sigma_min = 0.5
+
+        if product == self.PRODUCTS["PEPPER"]:
+            slow_alpha = 2 / (L_slow + 1)
+            if self.slow_ema[product] is None:
+                self.slow_ema[product] = mid
+            else:
+                self.slow_ema[product] = (
+                    slow_alpha * mid + (1 - slow_alpha) * self.slow_ema[product]
+                )
+            series = mid - self.slow_ema[product]
+            warmup = L_slow
+        else:
+            series = mid
+            warmup = W_fast
+
+        alpha = 2 / (W_fast + 1)
+        old_mu = self.mu[product]
+        old_var = self.sigma[product]
+        self.algo4_seen[product] += 1
+
+        if old_mu is None:
+            self.mu[product] = series
+            self.sigma[product] = 0.0
+            return []
+
+        if old_var is None:
+            old_var = 0.0
+
+        new_mu = alpha * series + (1 - alpha) * old_mu
+        new_var = (1 - alpha) * (old_var + alpha * (series - old_mu) ** 2)
+        self.mu[product] = new_mu
+        self.sigma[product] = new_var
+
+        if self.algo4_seen[product] < warmup:
+            return []
+
+        sigma = max(new_var, 0.0) ** 0.5
+        if sigma < sigma_min:
+            return []
+
+        z_score = (series - new_mu) / sigma
+        previous_target = self.algo4_target.get(product, 0)
+
+        if z_score > z_in:
+            target = -int(round(q_max * min(abs(z_score), z_max) / z_max))
+        elif z_score < -z_in:
+            target = int(round(q_max * min(abs(z_score), z_max) / z_max))
+        elif abs(z_score) < z_out:
+            target = 0
+        else:
+            target = previous_target
+
+        self.algo4_target[product] = target
+
+        position = self.get_position(product, state)
+        trade_qty = target - position
+        limit = self.POSITION_LIMITS[product]
+        capacity_buy = limit - position
+        capacity_sell = limit + position
+
+        orders: List[Order] = []
+        if trade_qty > 0:
+            quantity = min(trade_qty, capacity_buy)
+            if quantity > 0:
+                orders.append(Order(product, best_bid, quantity))
+        elif trade_qty < 0:
+            quantity = min(-trade_qty, capacity_sell)
+            if quantity > 0:
+                orders.append(Order(product, best_ask, -quantity))
+        return orders
 
     def run(self, state: TradingState) -> Tuple[Dict[str, List[Order]], int, str]:
         self._load_trader_data(state.traderData)
@@ -307,6 +441,8 @@ class Trader:
             return self.algorithm_2(state, product)
         if self.OSMIUM_ALGORITHM == 3:
             return self.algorithm_3(state, product)
+        if self.OSMIUM_ALGORITHM == 4:
+            return self.algorithm_4(state, product)
         return []
 
     def _trade_pepper(self, state: TradingState) -> List[Order]:
@@ -317,6 +453,8 @@ class Trader:
             return self.algorithm_2(state, product)
         if self.PEPPER_ALGORITHM == 3:
             return self.algorithm_3(state, product)
+        if self.PEPPER_ALGORITHM == 4:
+            return self.algorithm_4(state, product)
         return []
 
     def _trade_adaptive(self, od: OrderDepth, position: int, best_bid: float, best_ask: float, mid: float) -> List[Order]:

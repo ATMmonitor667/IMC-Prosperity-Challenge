@@ -213,6 +213,7 @@ Idea:
   baseline. Compute a z-score and trade against extremes. For Pepper,
   detrend with a slow EMA so the daily drift doesn't make z permanently
   positive or negative.
+python -m py_compile myTrader.py
 
 Inputs per tick:
   - mid for each product.
