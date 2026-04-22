@@ -117,7 +117,7 @@ Per-tick procedure (per product):
   3. Inventory skew shift:
        skew = -k * (p / LIMIT) * s
      (Long  -> negative shift -> both quotes move down -> easier to sell.
-      Short -> positive shift -> both quotes move up   -> easier to buy.)
+      Short -> positive shif ift -> both quotes move up   -> easier to buy.)
   4. Bid price = round(fair + skew - s)
      Ask price = round(fair + skew + s)
   5. Sizes: bid_size = min(q, capacity_buy), ask_size = min(q, capacity_sell).

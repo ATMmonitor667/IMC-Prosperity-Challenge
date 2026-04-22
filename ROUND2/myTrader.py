@@ -17,7 +17,11 @@ from typing import Dict, List, Tuple
 '''
 
 class Trader:
-    ACTIVE_ALGORITHM = 1
+    # Change these to choose which generic algorithm each product uses.
+    # Valid choices: 1, 2, or 3.
+    # Example: OSMIUM_ALGORITHM = 1 and PEPPER_ALGORITHM = 3.
+    OSMIUM_ALGORITHM = 2
+    PEPPER_ALGORITHM = 2
 
     def __init__(self, state=None):
         self.PRODUCTS = {
@@ -121,24 +125,21 @@ class Trader:
         capacity_buy = limit - position
         capacity_sell = limit + position
 
+        #==============================================================
+        # Algorithm 1: Static Quote Market Making (Baseline)
+        # Product-neutral: same spread and size for any product passed in.
+        #==============================================================
+        spread = 3
+        size = 5
         orders: List[Order] = []
-        if product == self.PRODUCTS["OSMIUM"]:
-            #==============================================================
-            # Algorithm 1: Static Quote Market Making (Baseline)
-            #==============================================================
-            spread = 1
-        elif product == self.PRODUCTS["PEPPER"]:
-            spread = 2
-        else:
-            return []
 
         bid_price = int(mid - spread)
         ask_price = int(mid + spread)
         bid_price, ask_price = self._clamp_quote_prices(
             bid_price, ask_price, order_depth
         )
-        bid_size = min(5, capacity_buy)
-        ask_size = min(5, capacity_sell)
+        bid_size = min(size, capacity_buy)
+        ask_size = min(size, capacity_sell)
 
         if bid_size > 0:
             orders.append(Order(product, bid_price, bid_size))
@@ -156,15 +157,13 @@ class Trader:
         if mid is None:
             return []
 
-        if product == self.PRODUCTS["OSMIUM"]:
-            n = 20
-            spread = 1
-        elif product == self.PRODUCTS["PEPPER"]:
-            n = 50
-            spread = 2
-        else:
-            return []
-
+        #==============================================================
+        # Algorithm 2: EMA Fair + Inventory-Skewed Quoting
+        # Product-neutral: same EMA length, spread, skew, and size.
+        #==============================================================
+        n = 20
+        spread = 1
+        size = 5
         alpha = 2 / (n + 1)
         fair_price = self.update_EMA(product, mid, alpha)
         if self.n_seen[product] < n:
@@ -183,14 +182,103 @@ class Trader:
         bid_price, ask_price = self._clamp_quote_prices(
             bid_price, ask_price, order_depth
         )
-        bid_size = min(5, capacity_buy)
-        ask_size = min(5, capacity_sell)
+        bid_size = min(size, capacity_buy)
+        ask_size = min(size, capacity_sell)
 
         orders: List[Order] = []
         if bid_size > 0:
             orders.append(Order(product, bid_price, bid_size))
         if ask_size > 0:
             orders.append(Order(product, ask_price, -ask_size))
+        return orders
+    
+    def algorithm_3(self, state: TradingState, product: str) -> List[Order]:
+        product = self._normalize_product(product)
+        if product is None or product not in state.order_depths:
+            return []
+
+        order_depth = state.order_depths[product]
+        best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
+        best_ask = min(order_depth.sell_orders.keys()) if order_depth.sell_orders else None
+        if best_bid is None and best_ask is None:
+            return []
+
+        mid = self.compute_mid(state, product)
+        if mid is None:
+            return []
+
+        if best_bid is None:
+            fair_price = float(best_ask)
+        elif best_ask is None:
+            fair_price = float(best_bid)
+        else:
+            size_at_bid = abs(order_depth.buy_orders[best_bid])
+            size_at_ask = abs(order_depth.sell_orders[best_ask])
+            total_size = size_at_bid + size_at_ask
+            if total_size > 0:
+                fair_price = (
+                    size_at_ask * best_bid + size_at_bid * best_ask
+                ) / total_size
+            else:
+                fair_price = mid
+
+        position = self.get_position(product, state)
+        limit = self.POSITION_LIMITS[product]
+        capacity_buy = limit - position
+        capacity_sell = limit + position
+
+        #==============================================================
+        # Algorithm 3: Microprice + Aggressive Take-Then-Make
+        # Product-neutral: same edges and sizes for any product passed in.
+        #==============================================================
+        take_edge = 1
+        make_spread = 1
+        take_size = 10
+        make_size = 5
+        orders: List[Order] = []
+
+        remaining_take = take_size
+        for ask_price in sorted(order_depth.sell_orders.keys()):
+            if capacity_buy <= 0 or remaining_take <= 0:
+                break
+            if ask_price > fair_price - take_edge:
+                break
+            available_size = abs(order_depth.sell_orders[ask_price])
+            quantity = min(available_size, capacity_buy, remaining_take)
+            if quantity > 0:
+                orders.append(Order(product, ask_price, quantity))
+                capacity_buy -= quantity
+                remaining_take -= quantity
+
+        remaining_take = take_size
+        for bid_price in sorted(order_depth.buy_orders.keys(), reverse=True):
+            if capacity_sell <= 0 or remaining_take <= 0:
+                break
+            if bid_price < fair_price + take_edge:
+                break
+            available_size = abs(order_depth.buy_orders[bid_price])
+            quantity = min(available_size, capacity_sell, remaining_take)
+            if quantity > 0:
+                orders.append(Order(product, bid_price, -quantity))
+                capacity_sell -= quantity
+                remaining_take -= quantity
+
+        if best_bid is None or best_ask is None or best_bid >= best_ask:
+            return orders
+
+        bid_price = int(fair_price - make_spread)
+        ask_price = int(fair_price + make_spread)
+        bid_price, ask_price = self._clamp_quote_prices(
+            bid_price, ask_price, order_depth
+        )
+
+        bid_size = min(make_size, capacity_buy)
+        ask_size = min(make_size, capacity_sell)
+        if bid_size > 0:
+            orders.append(Order(product, bid_price, bid_size))
+        if ask_size > 0:
+            orders.append(Order(product, ask_price, -ask_size))
+
         return orders
 
     def run(self, state: TradingState) -> Tuple[Dict[str, List[Order]], int, str]:
@@ -199,24 +287,38 @@ class Trader:
         self.orders = []
 
         for product in state.order_depths:
-            if self._normalize_product(product) is None:
-                result[product] = []
-                continue
-
-            if self.ACTIVE_ALGORITHM == 1:
-                orders = self._algorithm_1(state, product)
+            if product == self.PRODUCTS["OSMIUM"]:
+                orders = self._trade_osmium(state)
+            elif product == self.PRODUCTS["PEPPER"]:
+                orders = self._trade_pepper(state)
             else:
-                orders = self.algorithm_2(state, product)
+                orders = []
 
             result[product] = orders
             self.orders.extend(orders)
 
         return result, 0, self._dump_trader_data()
 
-    def _trade_osmium(self, od: OrderDepth, position: int, best_bid: float, best_ask: float, mid: float) -> List[Order]:
-        pass
-    def _trade_pepper(self, od: OrderDepth, position: int, best_bid: float, best_ask: float, mid: float, timestamp: int, memory: dict) -> List[Order]:
-        pass
+    def _trade_osmium(self, state: TradingState) -> List[Order]:
+        product = self.PRODUCTS["OSMIUM"]
+        if self.OSMIUM_ALGORITHM == 1:
+            return self._algorithm_1(state, product)
+        if self.OSMIUM_ALGORITHM == 2:
+            return self.algorithm_2(state, product)
+        if self.OSMIUM_ALGORITHM == 3:
+            return self.algorithm_3(state, product)
+        return []
+
+    def _trade_pepper(self, state: TradingState) -> List[Order]:
+        product = self.PRODUCTS["PEPPER"]
+        if self.PEPPER_ALGORITHM == 1:
+            return self._algorithm_1(state, product)
+        if self.PEPPER_ALGORITHM == 2:
+            return self.algorithm_2(state, product)
+        if self.PEPPER_ALGORITHM == 3:
+            return self.algorithm_3(state, product)
+        return []
+
     def _trade_adaptive(self, od: OrderDepth, position: int, best_bid: float, best_ask: float, mid: float) -> List[Order]:
         pass
 
