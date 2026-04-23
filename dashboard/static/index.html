@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IMC Prosperity – Algo Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+</head>
+<body>
+  <header>
+    <h1>IMC Prosperity — Algorithmic Trend Dashboard</h1>
+    <span id="status" class="status"></span>
+  </header>
+
+  <section class="controls">
+    <div class="control-group">
+      <label>Source</label>
+      <div class="radio-row">
+        <label><input type="radio" name="source" value="round" checked /> Round data</label>
+        <label><input type="radio" name="source" value="backtest" /> Backtest log</label>
+      </div>
+    </div>
+
+    <div class="control-group" id="round-controls">
+      <label for="round-select">Round</label>
+      <select id="round-select"></select>
+      <label for="day-select">Day</label>
+      <select id="day-select"></select>
+    </div>
+
+    <div class="control-group hidden" id="backtest-controls">
+      <label for="backtest-select">Backtest</label>
+      <select id="backtest-select"></select>
+    </div>
+
+    <div class="control-group">
+      <label for="product-select">Product</label>
+      <select id="product-select"></select>
+    </div>
+
+    <button id="load-btn" class="primary">Load</button>
+  </section>
+
+  <section class="summary-strip" id="summary-strip"></section>
+
+  <section class="charts">
+    <div class="chart-block">
+      <h2>Price &amp; own trades</h2>
+      <div id="chart-price" class="chart"></div>
+    </div>
+
+    <div class="chart-row">
+      <div class="chart-block half">
+        <h2>Order-book depth</h2>
+        <div id="chart-depth" class="chart"></div>
+      </div>
+      <div class="chart-block half">
+        <h2>Bid–ask spread</h2>
+        <div id="chart-spread" class="chart"></div>
+      </div>
+    </div>
+
+    <div class="chart-row">
+      <div class="chart-block half">
+        <h2>PnL &amp; position</h2>
+        <div id="chart-pnl" class="chart"></div>
+      </div>
+      <div class="chart-block half">
+        <h2>Trade-size distribution</h2>
+        <div id="chart-trades" class="chart"></div>
+      </div>
+    </div>
+  </section>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>
