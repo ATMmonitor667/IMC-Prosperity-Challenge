@@ -2,6 +2,9 @@
 
 Run:  python dashboard/server.py [--port 8765]
 Open: http://localhost:8765
+
+Dev UI: cd dashboard/web, npm install, npm run dev (proxies /api to this server on 8765).
+Production assets: npm run build outputs to dashboard/static/ (Vite; serves /assets/*).
 """
 from __future__ import annotations
 
@@ -222,10 +225,20 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         qs = urllib.parse.parse_qs(parsed.query)
+        static_root = STATIC.resolve()
 
         try:
             if path == "/" or path == "/index.html":
                 self._send_file(STATIC / "index.html")
+                return
+            if path.startswith("/assets/"):
+                # Vite build output: /assets/* → dashboard/static/assets/*
+                rel = path.lstrip("/")
+                candidate = (STATIC / rel).resolve()
+                if not str(candidate).startswith(str(static_root)):
+                    self._send_json({"error": "Path escape"}, 400)
+                    return
+                self._send_file(candidate)
                 return
             if path.startswith("/static/"):
                 self._send_file(STATIC / path[len("/static/"):])
