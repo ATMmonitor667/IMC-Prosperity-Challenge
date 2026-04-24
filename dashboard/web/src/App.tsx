@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { buildAllCharts } from './buildCharts'
+import { buildAllCharts, DEFAULT_PRICE_LAYERS, type PriceLayerToggles } from './buildCharts'
 import { PlotlyChart } from './PlotlyChart'
+import { parseXRangeFromRelayout } from './plotlyRelayout'
+import { buildProductTable, sortTableRows, type ProductTableRow, type TableSortKey } from './productTable'
+import { withTimeXRange } from './timeAxisLayout'
 import type { LoadResponse, RoundInfo, SourcesResponse } from './types'
 
 async function fetchJSON<T>(url: string): Promise<T> {
@@ -72,6 +75,34 @@ function StatusPill({ ok, children }: { ok: boolean | null; children: string }) 
   )
 }
 
+const LAYER_OPTIONS: { key: keyof PriceLayerToggles; label: string; submissionOnly?: boolean }[] = [
+  { key: 'mid', label: 'Mid' },
+  { key: 'bid', label: 'Bid' },
+  { key: 'ask', label: 'Ask' },
+  { key: 'ownBuys', label: 'Own buys', submissionOnly: true },
+  { key: 'ownSells', label: 'Own sells', submissionOnly: true },
+]
+
+const TABLE_COLUMNS: { key: TableSortKey; label: string; align: 'left' | 'right' }[] = [
+  { key: 'product', label: 'Product', align: 'left' },
+  { key: 'ticks', label: 'Ticks', align: 'right' },
+  { key: 'lastMid', label: 'Last mid', align: 'right' },
+  { key: 'midSigma', label: 'Mid σ', align: 'right' },
+  { key: 'avgSpread', label: 'Avg spr.', align: 'right' },
+  { key: 'tradeCount', label: 'Trades', align: 'right' },
+  { key: 'volume', label: 'Volume', align: 'right' },
+  { key: 'finalPnl', label: 'Final PnL', align: 'right' },
+  { key: 'position', label: 'Position', align: 'right' },
+]
+
+function toggleLayer(prev: PriceLayerToggles, key: keyof PriceLayerToggles): PriceLayerToggles {
+  const next = { ...prev, [key]: !prev[key] }
+  if (!next.mid && !next.bid && !next.ask && !next.ownBuys && !next.ownSells) {
+    return { ...next, mid: true }
+  }
+  return next
+}
+
 export default function App() {
   const [sources, setSources] = useState<SourcesResponse | null>(null)
   const [sourceMode, setSourceMode] = useState<SourceMode>('round')
@@ -81,6 +112,12 @@ export default function App() {
   const [product, setProduct] = useState('')
   const [current, setCurrent] = useState<LoadResponse | null>(null)
   const [status, setStatus] = useState({ text: 'Starting…', ok: null as boolean | null })
+  const [xRange, setXRange] = useState<[number, number] | null>(null)
+  const [priceLayers, setPriceLayers] = useState<PriceLayerToggles>(DEFAULT_PRICE_LAYERS)
+  const [tableSort, setTableSort] = useState<{ key: TableSortKey; dir: 'asc' | 'desc' }>({
+    key: 'product',
+    dir: 'asc',
+  })
 
   const rounds: RoundInfo[] = sources?.rounds ?? []
   const selectedRound = useMemo(
@@ -125,6 +162,8 @@ export default function App() {
           : `/api/backtest?file=${encodeURIComponent(backtestPath)}`
       const data = await fetchJSON<LoadResponse>(url)
       setCurrent(data)
+      setXRange(null)
+      setPriceLayers(DEFAULT_PRICE_LAYERS)
       const prods = data.prices.products
       if (prods.length === 0) {
         setProduct('')
@@ -142,10 +181,55 @@ export default function App() {
     }
   }, [sourceMode, roundId, day, backtestPath])
 
+  const tableRows = useMemo(() => {
+    const raw = buildProductTable(current)
+    return sortTableRows(raw, tableSort.key, tableSort.dir)
+  }, [current, tableSort])
+
+  const onHeaderClick = (key: TableSortKey) => {
+    setTableSort((s) => {
+      if (s.key === key) {
+        return { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+      }
+      return { key, dir: 'asc' }
+    })
+  }
+
+  const handlePriceRelayout = useCallback((ev: Readonly<Record<string, unknown>>) => {
+    const p = parseXRangeFromRelayout(ev)
+    if (p === null) {
+      return
+    }
+    if (p === 'autorange') {
+      setXRange(null)
+    } else {
+      setXRange(p)
+    }
+  }, [])
+
   const charts = useMemo(() => {
-    if (!current || !product) return null
-    return buildAllCharts(current, product)
-  }, [current, product])
+    if (!current || !product) {
+      return null
+    }
+    return buildAllCharts(current, product, priceLayers)
+  }, [current, product, priceLayers])
+
+  const priceLayout = useMemo(
+    () => (charts ? withTimeXRange(charts.price.layout, xRange) : {}),
+    [charts, xRange],
+  )
+  const depthLayout = useMemo(
+    () => (charts ? withTimeXRange(charts.depth.layout, xRange) : {}),
+    [charts, xRange],
+  )
+  const spreadLayout = useMemo(
+    () => (charts ? withTimeXRange(charts.spread.layout, xRange) : {}),
+    [charts, xRange],
+  )
+  const pnlLayout = useMemo(
+    () => (charts ? withTimeXRange(charts.pnl.layout, xRange) : {}),
+    [charts, xRange],
+  )
 
   return (
     <div className="mx-auto min-h-screen max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
@@ -156,7 +240,8 @@ export default function App() {
             Algorithmic trend dashboard
           </h1>
           <p className="mt-1 max-w-xl text-sm text-white/50">
-            Inspect round CSVs and backtest logs: prices, book depth, spreads, PnL, and your own fills.
+            Inspect round CSVs and backtest logs: prices, book depth, spreads, PnL, and your own fills. Zoom the price
+            chart to sync the time window on the panels below; double-click a chart to reset the X axis.
           </p>
         </div>
         <StatusPill ok={status.ok}>{status.text}</StatusPill>
@@ -273,6 +358,72 @@ export default function App() {
         </Panel>
       </div>
 
+      {tableRows.length > 0 ? (
+        <Panel className="mb-5 overflow-x-auto">
+          <div className="p-3 sm:p-4">
+            <SectionTitle subtitle="Click a row to select product · click header to sort">
+              All products
+            </SectionTitle>
+            <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+              <thead>
+                <tr className="border-b border-white/10 text-white/50">
+                  {TABLE_COLUMNS.map((c) => (
+                    <th
+                      key={c.key}
+                      className={`whitespace-nowrap py-2 pr-3 text-[0.65rem] font-medium tracking-wider uppercase ${
+                        c.align === 'right' ? 'text-right' : 'text-left'
+                      } ${c.key === 'finalPnl' || c.key === 'position' ? 'max-sm:hidden' : ''}`}
+                    >
+                      <button
+                        type="button"
+                        className={`inline-flex w-full items-center gap-1 text-white/50 hover:text-white/90 ${
+                          c.align === 'right' ? 'justify-end' : 'justify-start'
+                        }`}
+                        onClick={() => onHeaderClick(c.key)}
+                      >
+                        {c.label}
+                        {tableSort.key === c.key ? (tableSort.dir === 'asc' ? ' \u00b7↑' : ' \u00b7↓') : ''}
+                      </button>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tableRows.map((row) => (
+                  <tr
+                    key={row.product}
+                    onClick={() => setProduct(row.product)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setProduct(row.product)
+                      }
+                    }}
+                    className={`cursor-pointer border-b border-white/5 font-mono text-[0.8rem] tabular-nums transition hover:bg-white/[0.06] ${
+                      row.product === product ? 'bg-[var(--color-accent)]/10' : ''
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    aria-current={row.product === product}
+                  >
+                    {TABLE_COLUMNS.map((c) => (
+                      <td
+                        key={c.key}
+                        className={`py-2 pr-3 ${c.align === 'right' ? 'text-right' : ''} ${
+                          c.key === 'finalPnl' || c.key === 'position' ? 'max-sm:hidden' : ''
+                        } text-white/90 ${c.key === 'product' ? 'font-sans' : ''}`}
+                      >
+                        {formatTableCell(row, c.key)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      ) : null}
+
       {charts && charts.summary.length > 0 ? (
         <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8">
           {charts.summary.map((s) => (
@@ -291,11 +442,48 @@ export default function App() {
         <div className="flex flex-col gap-5">
           <Panel>
             <div className="p-3 sm:p-4">
-              <SectionTitle>Price and your trades</SectionTitle>
+              <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <SectionTitle>Price and your trades</SectionTitle>
+                  <p className="m-0 text-[0.7rem] text-white/40">Drag to zoom, box-select, or use mode bar · layers:</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {LAYER_OPTIONS.map((opt) => {
+                    const dis = opt.submissionOnly && !current?.has_submission
+                    const on = priceLayers[opt.key]
+                    return (
+                      <label
+                        key={opt.key}
+                        className={`inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-[#0a0e14] px-2.5 py-1 text-xs ${
+                          dis ? 'cursor-not-allowed opacity-40' : 'cursor-pointer hover:border-white/20'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="accent-sky-400"
+                          checked={on}
+                          disabled={!!dis}
+                          onChange={() => setPriceLayers((p) => toggleLayer(p, opt.key))}
+                        />
+                        {opt.label}
+                      </label>
+                    )
+                  })}
+                  <button
+                    type="button"
+                    className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1 text-xs text-white/80 hover:border-white/30"
+                    onClick={() => setXRange(null)}
+                    title="Reset time zoom on all linked charts (same as double-click autoscale on X)"
+                  >
+                    Reset time window
+                  </button>
+                </div>
+              </div>
               <PlotlyChart
                 className="h-[min(40vh,420px)] w-full"
                 data={charts.price.data}
-                layout={charts.price.layout}
+                layout={priceLayout}
+                onRelayout={handlePriceRelayout}
               />
             </div>
           </Panel>
@@ -303,21 +491,21 @@ export default function App() {
           <div className="grid gap-5 lg:grid-cols-2">
             <Panel>
               <div className="p-3 sm:p-4">
-                <SectionTitle>Order-book depth</SectionTitle>
+                <SectionTitle subtitle="Time axis linked from price">Order-book depth</SectionTitle>
                 <PlotlyChart
                   className="h-[min(32vh,320px)] w-full"
                   data={charts.depth.data}
-                  layout={charts.depth.layout}
+                  layout={depthLayout}
                 />
               </div>
             </Panel>
             <Panel>
               <div className="p-3 sm:p-4">
-                <SectionTitle>Bid–ask spread</SectionTitle>
+                <SectionTitle subtitle="Time axis linked from price">Bid–ask spread</SectionTitle>
                 <PlotlyChart
                   className="h-[min(32vh,320px)] w-full"
                   data={charts.spread.data}
-                  layout={charts.spread.layout}
+                  layout={spreadLayout}
                 />
               </div>
             </Panel>
@@ -326,17 +514,13 @@ export default function App() {
           <div className="grid gap-5 lg:grid-cols-2">
             <Panel>
               <div className="p-3 sm:p-4">
-                <SectionTitle>PnL and position</SectionTitle>
-                <PlotlyChart
-                  className="h-[min(32vh,320px)] w-full"
-                  data={charts.pnl.data}
-                  layout={charts.pnl.layout}
-                />
+                <SectionTitle subtitle="Time axis linked from price">PnL and position</SectionTitle>
+                <PlotlyChart className="h-[min(32vh,320px)] w-full" data={charts.pnl.data} layout={pnlLayout} />
               </div>
             </Panel>
             <Panel>
               <div className="p-3 sm:p-4">
-                <SectionTitle>Trade size distribution</SectionTitle>
+                <SectionTitle>Trade size distribution (full sample)</SectionTitle>
                 <PlotlyChart
                   className="h-[min(32vh,320px)] w-full"
                   data={charts.trades.data}
@@ -356,4 +540,19 @@ export default function App() {
       )}
     </div>
   )
+}
+
+function formatTableCell(row: ProductTableRow, key: TableSortKey): string {
+  if (key === 'finalPnl' || key === 'position') {
+    if (row[key] === null) {
+      return '—'
+    }
+  }
+  if (key === 'volume' || key === 'tradeCount' || key === 'ticks') {
+    return (row[key] as number).toLocaleString()
+  }
+  if (key === 'product') {
+    return row.product
+  }
+  return String(row[key])
 }

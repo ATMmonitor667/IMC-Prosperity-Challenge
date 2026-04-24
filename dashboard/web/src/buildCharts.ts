@@ -9,22 +9,43 @@ function t(text: string) {
   return { text }
 }
 
+export type PriceLayerToggles = {
+  mid: boolean
+  bid: boolean
+  ask: boolean
+  ownBuys: boolean
+  ownSells: boolean
+}
+
+export const DEFAULT_PRICE_LAYERS: PriceLayerToggles = {
+  mid: true,
+  bid: true,
+  ask: true,
+  ownBuys: true,
+  ownSells: true,
+}
+
 function price(
   d: ProductSeries,
   hasSubmission: boolean,
   trades: TradeRow[],
   product: string,
+  layers: PriceLayerToggles,
 ): { data: Data[]; layout: Partial<Layout> } {
-  const traces: Data[] = [
-    {
+  const traces: Data[] = []
+
+  if (layers.mid) {
+    traces.push({
       x: d.t,
       y: d.mid,
       name: 'mid',
       type: 'scatter',
       mode: 'lines',
       line: { color: '#4da3ff', width: 1.8 },
-    },
-    {
+    })
+  }
+  if (layers.bid) {
+    traces.push({
       x: d.t,
       y: d.bid1,
       name: 'best bid',
@@ -32,8 +53,10 @@ function price(
       mode: 'lines',
       line: { color: '#3ecf8e', width: 1 },
       opacity: 0.8,
-    },
-    {
+    })
+  }
+  if (layers.ask) {
+    traces.push({
       x: d.t,
       y: d.ask1,
       name: 'best ask',
@@ -41,36 +64,47 @@ function price(
       mode: 'lines',
       line: { color: '#f4727a', width: 1 },
       opacity: 0.8,
-    },
-  ]
+    })
+  }
 
   if (hasSubmission) {
     const buys = ownTrades(trades, product)
     const sells = selfSells(trades, product)
-    if (buys.length) {
+    if (layers.ownBuys && buys.length) {
       traces.push({
-        x: buys.map((t) => t.timestamp),
-        y: buys.map((t) => t.price),
+        x: buys.map((tr) => tr.timestamp),
+        y: buys.map((tr) => tr.price),
         name: 'own buys',
         type: 'scatter',
         mode: 'markers',
         marker: { color: '#3ecf8e', symbol: 'triangle-up', size: 9, line: { color: '#0a0e14', width: 1 } },
-        text: buys.map((t) => `qty ${t.quantity} @ ${t.price}`),
+        text: buys.map((tr) => `qty ${tr.quantity} @ ${tr.price}`),
         hoverinfo: 'x+text',
       })
     }
-    if (sells.length) {
+    if (layers.ownSells && sells.length) {
       traces.push({
-        x: sells.map((t) => t.timestamp),
-        y: sells.map((t) => t.price),
+        x: sells.map((tr) => tr.timestamp),
+        y: sells.map((tr) => tr.price),
         name: 'own sells',
         type: 'scatter',
         mode: 'markers',
         marker: { color: '#f4727a', symbol: 'triangle-down', size: 9, line: { color: '#0a0e14', width: 1 } },
-        text: sells.map((t) => `qty ${t.quantity} @ ${t.price}`),
+        text: sells.map((tr) => `qty ${tr.quantity} @ ${tr.price}`),
         hoverinfo: 'x+text',
       })
     }
+  }
+
+  if (traces.length === 0) {
+    traces.push({
+      x: d.t,
+      y: d.mid,
+      name: 'mid',
+      type: 'scatter',
+      mode: 'lines',
+      line: { color: '#4da3ff', width: 1.2 },
+    })
   }
 
   return {
@@ -292,6 +326,7 @@ function buildSummary(
 export function buildAllCharts(
   current: LoadResponse,
   product: string,
+  priceLayers: PriceLayerToggles = DEFAULT_PRICE_LAYERS,
 ): {
   price: { data: Data[]; layout: Partial<Layout> }
   depth: { data: Data[]; layout: Partial<Layout> }
@@ -312,7 +347,7 @@ export function buildAllCharts(
     }
   }
   return {
-    price: price(d, current.has_submission, current.trades, product),
+    price: price(d, current.has_submission, current.trades, product, priceLayers),
     depth: depth(d),
     spread: spread(d),
     pnl: pnl(d, current.has_submission, current.trades, product),

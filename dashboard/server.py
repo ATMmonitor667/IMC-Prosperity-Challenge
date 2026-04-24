@@ -28,8 +28,16 @@ STATIC = Path(__file__).resolve().parent / "static"
 ROUND_DIRS = {
     "1": ROOT / "ROUND1",
     "2": ROOT / "ROUND2",
+    "3": ROOT / "ROUND3",
+    "4": ROOT / "ROUND4",
 }
-BACKTEST_DIRS = [ROOT / "backtests", ROOT / "ROUND1" / "backtests", ROOT / "ROUND2" / "backtests"]
+BACKTEST_DIRS = [
+    ROOT / "backtests",
+    ROOT / "ROUND1" / "backtests",
+    ROOT / "ROUND2" / "backtests",
+    ROOT / "ROUND3" / "backtests",
+    ROOT / "ROUND4" / "backtests",
+]
 
 
 # --------------------------------------------------------------------------- helpers
