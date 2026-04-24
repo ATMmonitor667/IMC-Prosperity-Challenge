@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Tuple
 
 from datamodel import Order, OrderDepth, TradingState
 
-# Update from competition brief / prosperity3bt `LIMITS` (see run_bt.py).
+# Update from competition brief / prosperity4bt `LIMITS` (see run_bt.py).
 DEFAULT_LIMIT = 20
 _LIMITS: Dict[str, int] = {
     "VELVETFRUIT_EXTRACT": 32,
