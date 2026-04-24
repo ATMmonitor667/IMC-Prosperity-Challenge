@@ -1,0 +1,683 @@
+ROUND 3 BOT IMPROVEMENT LOG
+From 32,656 total PnL to 47,987 total PnL
+
+1. Objective
+
+The goal was not to make cosmetic changes to trader.py. The goal was to treat Round 3 as a quant research problem:
+
+- Verify the exact API and backtest contract first.
+- Inspect the local CSV structure.
+- Measure product behavior directly from data.
+- Form hypotheses about fair value, mean reversion, trend, ladder structure, and possible arbitrage.
+- Implement stronger versions locally.
+- Backtest each idea.
+- Keep only the changes that improved PnL on the local round 3 days.
+
+
+2. API and Repository Validation
+
+Files inspected first:
+
+- ROUND3/datamodel.py
+- ROUND3/trader.py
+- ROUND3/run_bt.py
+- ROUND3/prices_round_3_day_0.csv
+- ROUND3/prices_round_3_day_1.csv
+- ROUND3/prices_round_3_day_2.csv
+- ROUND3/trades_round_3_day_0.csv
+- ROUND3/trades_round_3_day_1.csv
+- ROUND3/trades_round_3_day_2.csv
+- ROUND3/INSIGHTS.md
+- ROUND3/analyze_r3_data.py
+
+Key API findings from datamodel.py:
+
+- The trader must implement Trader.run(self, state: TradingState).
+- The return signature is:
+  (Dict[str, List[Order]], int, str)
+- The int is conversions.
+- The str is traderData.
+
+This mattered because I avoided making any assumptions about the return type.
+
+
+3. Backtest Setup
+
+The local backtester expected a data layout like:
+
+- ROUND3/round3/prices_round_3_day_*.csv
+- ROUND3/round3/trades_round_3_day_*.csv
+
+I created that local layout so I could run:
+
+python ROUND3\run_bt.py ROUND3\trader.py 3-0 3-1 3-2 --data ROUND3 --no-progress --merge-pnl
+
+I also verified that prosperity3bt was installed locally before iterating.
+
+
+4. Baseline Result
+
+Initial local baseline from the original ROUND3/trader.py:
+
+- Day 0: 13,488
+- Day 1: 13,004
+- Day 2:  6,164
+- Total: 32,656
+
+Per-product baseline highlights:
+
+- HYDROGEL_PACK was already strong.
+- VEV_4000, VEV_4500, VEV_5200, VEV_5300 were profitable.
+- VELVETFRUIT_EXTRACT was mixed and negative on some days.
+- VEV_5000 and VEV_5100 were unstable, especially on day 2.
+- VEV_6000 and VEV_6500 contributed essentially nothing.
+
+
+5. Offline Data Analysis Performed
+
+I used helper one-off analysis scripts offline with pandas/numpy. The submitted trader.py remained self-contained and pure Python.
+
+5.1 Mid-price / spread / volatility inspection
+
+Across all 3 days I computed per-product:
+
+- average mid-price
+- mid-price standard deviation
+- average top-of-book spread
+- lag-1 autocorrelation of first differences
+
+Important measured stats:
+
+HYDROGEL_PACK
+- mean mid about 9990.81
+- std about 31.94
+- average spread about 15.72
+- lag-1 diff autocorr about -0.129
+
+VELVETFRUIT_EXTRACT
+- mean mid about 5250.10
+- std about 15.63
+- average spread about 4.99
+- lag-1 diff autocorr about -0.158
+
+VEV_4000
+- mean mid about 1250.11
+- std about 15.65
+- average spread about 20.81
+- lag-1 diff autocorr about -0.284
+
+VEV_4500
+- mean mid about 750.11
+- std about 15.64
+- average spread about 15.85
+- lag-1 diff autocorr about -0.224
+
+VEV_5000
+- mean mid about 255.02
+- std about 14.38
+- average spread about 6.04
+- lag-1 diff autocorr about -0.098
+
+VEV_5100
+- mean mid about 166.81
+- std about 12.74
+- average spread about 4.30
+- lag-1 diff autocorr about -0.094
+
+VEV_5200
+- mean mid about 95.55
+- std about 9.66
+- average spread about 2.89
+- lag-1 diff autocorr about -0.135
+
+VEV_5300
+- mean mid about 46.76
+- std about 6.23
+- average spread about 2.11
+- lag-1 diff autocorr about -0.210
+
+VEV_5400
+- mean mid about 15.95
+- std about 3.43
+- average spread about 1.38
+- lag-1 diff autocorr about -0.254
+
+VEV_5500
+- mean mid about 6.64
+- std about 1.74
+- average spread about 1.15
+- lag-1 diff autocorr about -0.245
+
+VEV_6000 and VEV_6500
+- mean mid about 0.50
+- std about 0.00
+- spread exactly about 1
+- effectively static
+
+Main conclusion:
+
+- Most names are short-horizon mean reverting in first differences.
+- The wings VEV_6000 and VEV_6500 are almost dead products in this data.
+- Wide-spread names need strong edges before taking liquidity.
+
+
+5.2 Correlation and ladder structure
+
+I computed correlation of product price changes with VELVETFRUIT_EXTRACT changes:
+
+- HYDROGEL_PACK: about 0.006
+- VEV_4000: about 0.595
+- VEV_4500: about 0.598
+- VEV_5000: about 0.754
+- VEV_5100: about 0.765
+- VEV_5200: about 0.717
+- VEV_5300: about 0.622
+- VEV_5400: about 0.540
+- VEV_5500: about 0.348
+
+Main conclusion:
+
+- HYDROGEL is basically independent from the VEV ladder.
+- The VEV ladder is strongly tied to VELVET.
+- The strongest relationship is around VEV_5000 and VEV_5100.
+
+
+5.3 Delta-like sensitivity of the VEV ladder
+
+I regressed option price changes on VELVET price changes:
+
+- VEV_4000 beta about 0.745
+- VEV_4500 beta about 0.662
+- VEV_5000 beta about 0.654
+- VEV_5100 beta about 0.577
+- VEV_5200 beta about 0.437
+- VEV_5300 beta about 0.273
+- VEV_5400 beta about 0.129
+- VEV_5500 beta about 0.055
+
+Main conclusion:
+
+- The VEV ladder behaves like a call option ladder on VELVET.
+- Lower strikes have higher spot sensitivity.
+- Higher strikes have lower spot sensitivity.
+
+
+5.4 Surface / option-like analysis
+
+I fit a simplified Black-Scholes style total-vol parameter to the VEV ladder using VELVET as the underlying reference.
+
+Measured common total vol stats:
+
+- mean about 0.0321
+- median about 0.0323
+- fairly tight range overall
+
+I also checked convexity in strike across the ladder.
+
+Result:
+
+- zero convexity violations in the sample used
+
+Main conclusion:
+
+- The ladder is internally consistent and looks option-like.
+- This justified testing surface-based fair values.
+
+
+5.5 Residual / mean reversion tests
+
+I tested residual signals like:
+
+- option change minus beta * VELVET change
+- option price minus fitted surface price
+
+For the delta-adjusted residuals, I found:
+
+- residual autocorrelation was negative
+- residuals had predictive mean reversion for the next change
+
+Examples:
+
+- VEV_4000 residual next-change correlation about -0.336
+- VEV_4500 about -0.287
+- VEV_5300 about -0.267
+- VEV_5400 about -0.301
+- VEV_5500 about -0.262
+
+Main conclusion:
+
+- There was real cross-product structure in the data.
+- That justified trying explicit surface / residual-based bots.
+
+
+5.6 Observations / conversions check
+
+The local ROUND3 folder does not include observations_round_3_day_*.csv.
+
+Main conclusion:
+
+- No supported local evidence for conversion logic in Round 3 here.
+- The final bot returns 0 conversions.
+
+
+6. Hypotheses Formed From Data
+
+The main working hypotheses were:
+
+1. The round is primarily a short-horizon mean-reversion market making problem.
+2. HYDROGEL should be handled independently.
+3. VELVET should be traded cautiously because it can help but can also cause large giveback if overtraded.
+4. VEV_5000 and VEV_5100 are the most connected to VELVET and therefore the easiest names to accidentally overtrade.
+5. The ladder is option-like, but the simulator fill model may reward simple spread capture more than explicit theoretical arbitrage.
+
+
+7. Strategy Experiments I Ran
+
+7.1 Full surface / hedge prototype
+
+I built a new trader that:
+
+- estimated a common surface vol
+- estimated option fair values from VELVET
+- used option deltas
+- tried hedge logic in VELVET
+
+Result:
+
+- Total PnL about -13,030
+
+Why it failed:
+
+- It over-rotated into explicit hedge behavior.
+- The backtester fill model punished that style.
+- VELVET losses dominated.
+
+
+7.2 Hybrid surface + existing execution
+
+I then kept more of the old execution logic and swapped in surface-based fair values for the VEV ladder.
+
+Result:
+
+- Total PnL about 4,697
+
+Why it still failed:
+
+- Better than the first rewrite, but still much worse than baseline.
+- Explicit surface value was not translating into better realized fills in this simulator.
+
+
+7.3 Ablation: remove VELVET entirely
+
+I copied the baseline bot and disabled VELVET trading only.
+
+Result:
+
+- Total PnL about 33,300
+
+Interpretation:
+
+- This alone beat the original 32,656 baseline.
+- That proved the current VELVET logic was too aggressive and hurting the portfolio.
+
+
+7.4 Ablation: remove VELVET, VEV_5000, and VEV_5100
+
+I then disabled the most correlated and unstable names together.
+
+Result:
+
+- Total PnL about 30,117
+
+Interpretation:
+
+- VEV_5000 and VEV_5100 were still net useful.
+- The issue was not that they should be removed.
+- The issue was that they needed tighter controls.
+
+
+7.5 Tuned value-maker variant
+
+I created a tuned version of the original architecture:
+
+- more conservative VELVET taking
+- more careful VEV_5000 and VEV_5100 thresholds
+- same robust inventory-aware passive market making base
+
+Result:
+
+- Total PnL about 45,676
+
+Interpretation:
+
+- The profitable core was already in the original bot.
+- The big win came from reducing bad aggression, not from replacing the architecture.
+
+
+7.6 Parameter sweep and final convergence
+
+I ran focused parameter sweeps around:
+
+- VELVET min take edge
+- VELVET take fraction
+- VELVET make fraction
+- drift threshold
+- VEV_5000 / VEV_5100 take settings
+
+Most important discovery from the sweep:
+
+- Increasing DRIFT_T_THRESHOLD steadily improved results.
+- At high enough values, the drift leg was effectively disabled.
+- This was the strongest single improvement.
+
+This confirmed the data intuition:
+
+- Round 3 locally behaved much more like mean-reverting spread capture than trend following.
+
+
+8. Final Changes That Produced 47,987
+
+The final winning version kept the original architecture but changed the control parameters.
+
+8.1 Drift leg disabled
+
+In the final trader:
+
+- DRIFT_T_THRESHOLD = 10.0
+
+Effect:
+
+- The strategy practically stops acting on weak trend estimates.
+- It behaves like a pure value / spread market maker.
+
+Why this helped:
+
+- Trend signals were hurting out-of-sample local performance.
+- Mean reversion was stronger and more reliable.
+
+
+8.2 VELVET was made much more conservative
+
+Final VELVET settings:
+
+- k_take = 2.3
+- min_take = 4
+- min_make = 2
+- take_frac = 0.14
+- make_frac = 0.10
+- vol_floor = 0.5
+
+Why this helped:
+
+- VELVET had enough edge to be worth trading, but only if the bot stopped forcing too many aggressive fills.
+- Lower take size and wider take thresholds preserved profitable opportunities while removing a lot of noise trades.
+
+
+8.3 VEV_5000 and VEV_5100 got special handling
+
+Final settings for VEV_5000 and VEV_5100:
+
+- k_take = 2.6
+- k_make = 0.55
+- min_take = 3
+- min_make = 2
+- take_frac = 0.20
+- make_frac = 0.10
+- vol_floor = 0.5
+
+Why this helped:
+
+- These were the most spot-linked VEV names.
+- They needed tighter entry control than the generic VEV settings.
+- The change preserved their upside while limiting bad inventory build-up.
+
+
+9. Final Verified Backtest
+
+Final ROUND3/trader.py result:
+
+- Day 0: 17,570
+- Day 1: 18,808
+- Day 2: 11,610
+- Total: 47,987
+
+Improvement over baseline:
+
+- 47,987 - 32,656 = 15,331
+
+That is about a 46.9 percent increase over the original total.
+
+
+10. Why the Final Version Worked Better
+
+The improvement did not come from a fancy new theoretical model being pushed into production unchanged.
+
+It came from three practical insights:
+
+1. The original architecture was already structurally sound.
+   It already had fair value estimation, market taking, passive quotes, inventory skew, limits, traderData state, and robust empty-book handling.
+
+2. The main drag was bad aggressiveness, not missing complexity.
+   The backtests showed that the trader was overtrading VELVET and some mid-ladder names.
+
+3. In this simulator, cleaner spread capture beat explicit cross-product theory.
+   The option-surface interpretation was real and useful for research, but direct surface-arb rewrites underperformed. The winning move was to use the research to tune where the existing execution logic was too loose.
+
+
+11. Pain Points and Weaknesses
+
+These are the main weaknesses that still remain and could be improved later.
+
+11.1 No explicit live cross-product execution
+
+Even though the VEV ladder clearly behaves like options on VELVET, the final bot still trades products mostly independently.
+
+Potential future improvement:
+
+- Build a residual-based cross-product executor that only acts when both legs are tradable at favorable prices.
+- Do not use theoretical value alone; use executable spread-aware residual entry logic.
+
+
+11.2 No deeper use of market trades / tape
+
+The bot does not use market_trades aggressively for regime or flow inference.
+
+Potential future improvement:
+
+- Build simple signed tape pressure features.
+- Distinguish between passive spread capture regimes and directional tape regimes.
+
+
+11.3 No dynamic regime classification
+
+The final bot uses online fair and vol updates, but it does not explicitly detect day-level or intraday regime changes.
+
+Potential future improvement:
+
+- Separate high-vol and low-vol states.
+- Widen or narrow quoting automatically based on current realized volatility and fill quality.
+
+
+11.4 No explicit fill-quality feedback loop
+
+The bot assumes that a fixed take_frac / make_frac calibration remains good.
+
+Potential future improvement:
+
+- Track recent own fills from state.own_trades.
+- If fills become too one-sided, widen or reduce size automatically.
+
+
+11.5 VEV_6000 and VEV_6500 are basically ignored
+
+They were close to static in the local sample, so they did not deserve aggressive attention.
+
+Potential future improvement:
+
+- Check if the official simulator or later unseen data allows edge from repeatedly quoting the wings.
+- If fills at 0 or 1 are exploitable, a tiny dedicated wing logic may help.
+
+
+11.6 Constants are still calibrated on only 3 local days
+
+This is the most obvious overfitting risk.
+
+Potential future improvement:
+
+- Use rolling walk-forward validation if more hidden-like samples or alternative matching assumptions are available.
+- Stress test under different trade matching settings in the backtester.
+
+
+11.7 No observations-based conversion logic
+
+There was no local evidence that conversions were supported in this Round 3 dataset.
+
+Potential future improvement:
+
+- If official round data includes observations/conversion inputs not present locally, add product-specific conversion arbitration immediately.
+
+
+11.8 Fair value model is still simple
+
+The final fair value is mostly online EWMA + vol-aware execution controls.
+
+Potential future improvement:
+
+- Add product-specific residual anchors or rolling z-scores.
+- Use richer state in traderData for residual mean and residual vol, not only raw return statistics.
+
+
+11.9 Backtester dependency risk
+
+The final winner is the winner under the local backtester and its fill model.
+
+Potential future improvement:
+
+- Re-run under alternate match settings such as different trade matching assumptions.
+- Compare sensitivity to fill assumptions before final submission.
+
+
+12. Final Summary
+
+The path from 32,656 to 47,987 was not about adding complexity for its own sake.
+
+The process was:
+
+- verify the exact API
+- build a real local backtest loop
+- measure the data
+- test the option-surface hypothesis
+- learn that explicit surface-arb underperformed
+- ablate the weak products
+- discover that VELVET aggression and drift-following were the main problems
+- disable the harmful drift leg
+- tighten VELVET and the most correlated VEV names
+- confirm the final result with a clean backtest
+
+Final practical lesson:
+
+The best Round 3 bot in this local setup was a disciplined, inventory-aware, mean-reverting market maker with carefully tuned aggression, not a trend follower and not a fully explicit theoretical options arbitrage bot.
+
+
+13. Addendum: Improvement From 47,987 to 61,305
+
+After the first process log was written, I ran another iteration cycle using the same core lesson:
+
+- keep the profitable market-making architecture
+- avoid large theoretical rewrites
+- improve only the parts that the data and backtests say are underexploited
+
+13.1 New hypothesis
+
+The first log already identified two remaining weaknesses:
+
+- no residual-based inventory target
+- HYDROGEL likely still under-optimized despite being one of the best books
+
+The next idea was:
+
+- let the spot-like books lean harder into mean reversion by using fair minus mid as an inventory target signal
+- let HYDROGEL quote more passive size once its taking edge is made stricter
+
+13.2 What was added
+
+Two specific changes survived backtesting:
+
+1. Residual-based inventory target on the spot-like books
+
+Instead of always targeting flat inventory except for the disabled drift term, the bot now adds:
+
+- a residual target based on (fair - mid) / take_edge
+
+This is applied only to:
+
+- VELVETFRUIT_EXTRACT
+- HYDROGEL_PACK
+
+Interpretation:
+
+- if price is temporarily cheap versus the bot's fair estimate, the bot is willing to lean longer
+- if price is temporarily rich, the bot is willing to lean shorter
+
+This was the clean implementation of the "residual / rolling z-score" idea that had been identified earlier as a remaining opportunity.
+
+2. Stronger HYDROGEL passive market making
+
+The old HYDROGEL setup was still too conservative on passive quoting.
+
+Final improved HYDROGEL settings:
+
+- min_take = 8
+- take_frac = 0.18
+- make_frac = 0.19
+
+Why it helped:
+
+- HYDROGEL has a wide spread and strong standalone edge
+- by demanding a stricter take edge, the bot avoids low-quality aggressive fills
+- by allowing larger passive size, the bot captures much more of the spread when the book comes back
+
+13.3 Final residual target scales
+
+The best clean local result came from:
+
+- VELVETFRUIT_EXTRACT residual scale = 1.05
+- HYDROGEL_PACK residual scale = 0.45
+
+Interpretation:
+
+- VELVET benefited from much stronger directional leaning around its fair value
+- HYDROGEL also benefited from leaning, but less aggressively than VELVET
+
+13.4 Final verified result
+
+Improved final result:
+
+- Day 0: 22,760
+- Day 1: 24,720
+- Day 2: 13,825
+- Total: 61,305
+
+Improvement over the previous best logged version:
+
+- 61,305 - 47,987 = 13,318
+
+Improvement over the original 32,656 baseline:
+
+- 61,305 - 32,656 = 28,649
+
+That is roughly an 87.7 percent increase over the original baseline.
+
+13.5 Updated practical lesson
+
+The second iteration reinforced the same conclusion as the first:
+
+- the edge in this local Round 3 setup comes from disciplined mean-reversion market making
+- the best improvements come from better inventory targeting and better aggression control
+- the biggest mistake is still overtrading weak edges
+
+The new version is not better because it is more complicated everywhere.
+It is better because it leans harder only where the local data consistently supports it:
+
+- residual mean reversion in the spot-like books
+- wide-spread spread capture in HYDROGEL

@@ -70,7 +70,7 @@ python ROUND3/analyze_r3_data.py
 
 - `trader.py` — `Trader` class for the competition API; per-product edges tuned from the CSVs (see module docstring).  
 - `datamodel.py` — same `TradingState` / `Order` / `OrderDepth` types as other rounds.  
-- `run_bt.py` — injects all 12 `LIMITS` then runs `prosperity3bt`. Point `--data` at your `bt_data` tree if not using a local `bt_data/` folder. **Verify position caps in the official brief** and update `_LIMITS_R3` / `trader._LIMITS` if they differ.
+- `run_bt.py` — injects all 12 `LIMITS` then runs the **Prosperity 4** backtester (`prosperity4bt`); IMC **game** round-3 data still live under `round3/`. **Verify position caps in the official brief** and update `_LIMITS_R3` / `trader._LIMITS` if they differ.
 
 ## Files in this folder
 

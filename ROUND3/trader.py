@@ -5,8 +5,10 @@ The historical books show 12 products:
   * VEV_4000 … VEV_6500 — a strike ladder; mids and spreads differ a lot by level.
 
 `analyze_r3_data.py` / `INSIGHTS.md` in this folder document correlations and mean spreads
-used to set per-name edge and size multipliers. Core logic: EWMA fair + Welford drift
-significance + vol-scaled take / make, same family as `ROUND2/trader.py` adaptive leg.
+used to set per-name edge and size multipliers. Final tuned version is a pure value/spread
+maker: EWMA fair + vol-scaled take / make + tighter inventory control, with a mild
+residual-based inventory target on the two spot-like books. The drift leg remains
+effectively disabled because it hurt out-of-sample backtests on the local round 3 days.
 
 Tweak `LIMITS` to match the official IMC per-product cap table.
 """
@@ -43,9 +45,13 @@ WARMUP_TICKS = 100
 
 MICRO_TILT = 0.3
 DRIFT_TARGET_SCALE = 2.0
-DRIFT_T_THRESHOLD = 1.0
+DRIFT_T_THRESHOLD = 10.0
 INV_SKEW_K = 1.0
 ANTI_TREND_BARRIER_MULT = 3.0
+RESIDUAL_TARGET_SCALES: Dict[str, float] = {
+    "VELVETFRUIT_EXTRACT": 1.05,
+    "HYDROGEL_PACK": 0.45,
+}
 
 
 @dataclass
@@ -71,18 +77,27 @@ def _edge_config(product: str, mid: float) -> EdgeConfig:
         vol_floor=0.0,
     )
     if product == "HYDROGEL_PACK":
-        c.min_take = max(c.min_take, 6)
+        c.min_take = max(c.min_take, 8)
         c.min_make = max(c.min_make, 4)
         c.k_make = 0.42
         c.take_frac = 0.18
-        c.make_frac = 0.09
+        c.make_frac = 0.19
         c.vol_floor = 1.0
     elif product == "VELVETFRUIT_EXTRACT":
-        c.min_take = max(c.min_take, 2)
+        c.k_take = 2.3
+        c.min_take = max(c.min_take, 4)
         c.min_make = max(c.min_make, 2)
         c.k_make = 0.45
+        c.take_frac = 0.14
+        c.make_frac = 0.10
         c.vol_floor = 0.5
     elif product.startswith("VEV_"):
+        if product in {"VEV_5000", "VEV_5100"}:
+            c.k_take, c.k_make = 2.6, 0.55
+            c.min_take, c.min_make = 3, 2
+            c.take_frac, c.make_frac = 0.20, 0.10
+            c.vol_floor = 0.5
+            return c
         if mid < 2.0:
             c.k_take, c.k_make = 1.2, 0.4
             c.min_take, c.min_make = 1, 1
@@ -239,6 +254,9 @@ class Trader:
         expected = (fair + effective_drift) * (1.0 - MICRO_TILT) + micro * MICRO_TILT
 
         base_take_edge = max(float(ec.min_take), ec.k_take * vol)
+        residual_scale = float(RESIDUAL_TARGET_SCALES.get(product, 0.0))
+        residual_target = _clamp((fair - mid) / max(1.0, base_take_edge), -1.0, 1.0) * residual_scale
+        target_frac = _clamp(target_frac + residual_target, -1.0, 1.0)
         make_edge = max(float(ec.min_make), ec.k_make * vol)
         if effective_drift > 0:
             buy_edge = max(float(ec.min_take), base_take_edge - max(0.0, effective_drift))
