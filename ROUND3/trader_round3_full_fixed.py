@@ -1,4 +1,4 @@
-﻿"""
+"""
 Round 3 — `Trader` (IMC Prosperity-style API).
 
 Products (edit at top for other rounds, e.g. VOLCANIC_ROCK + vouchers):
@@ -81,16 +81,27 @@ def _T_years() -> float:
 # Module switches (N: modular)
 ENABLE_IV_SMILE = True
 ENABLE_IVR_Z = True
-ENABLE_PAIR_ARB_BS = False
-# If True: `option_fair` for *execution* uses the old median-IV one-factor surface (profitable
-# in local BT). The quadratic smile is still estimated and stored in `traderData` for research.
+
+# Improved version:
+# 1) keep the stable median-IV surface as a low-noise anchor,
+# 2) blend in the quadratic smile only when the smile fit is healthy,
+# 3) use residual z-scores for inventory targeting and take decisions.
+ENABLE_PAIR_ARB_BS = True
 USE_STABLE_TRADE_SURFACE = True
-ENABLE_COINT_PAIRS = True
+HYBRID_SMILE_WEIGHT = 0.35          # 0 = pure stable surface, 1 = pure smile
+SMILE_MSE_CUTOFF = 0.0016           # if smile fit is noisy, fall back toward stable surface
+ENABLE_COINT_PAIRS = False          # old hard-coded pairs are easy to overfit; leave off by default
 ENABLE_UMR_UNDERLYING = True
-# 0: EW/MM does not use raw BS fair as level anchor; >0 gently blends (PROCESS_LOG: full replace hurt)
-BS_FAIR_LEVEL_BLEND = 0.0
+
+# Moderate model influence. The old file set most of these to 0, so the option model mostly
+# became an analysis tool instead of a trading signal.
+BS_FAIR_LEVEL_BLEND = 0.10
+OPTION_MODEL_BLEND = 0.10
+OPTION_TARGET_SCALE = 0.32
+RESIDUAL_Z_TARGET_SCALE = 0.24
+MAX_OPTION_TARGET_FRAC = 0.65
 # Strengthen/soften how smile vs IV z-score can disagree (0 = ignore disagreement)
-SIGNAL_CONFLICT_DAMP = 0.4
+SIGNAL_CONFLICT_DAMP = 0.55
 
 # IV inversion & smile
 IV_SOLVER_LO, IV_SOLVER_HI = 0.01, 2.5
@@ -100,7 +111,7 @@ IV_TRAIL_MAX = 64
 SMEAR_MIN_PTS = 3
 
 # Pair arb (BS): adjacent strikes only, conservative
-PAIR_ARB_MIN_EDGE = 4.0
+PAIR_ARB_MIN_EDGE = 6.0
 PAIR_ARB_QTY = 1
 
 # Underlying EMA mean reversion (light)
@@ -153,10 +164,6 @@ STRIKE_VOL_MULT: Dict[int, float] = {
 }
 SURFACE_VOL_INIT = 0.032
 SURFACE_VOL_ALPHA = 0.20
-OPTION_MODEL_BLEND = 0.0
-# Keep near zero: in this backtester, strong BS inventory tilts to mid destroyed PnL.
-# BS/smile still drives `option_fair` for *take* triggers and analysis in traderData.
-OPTION_TARGET_SCALE = 0.0
 OPTION_TARGET_SCALES: Dict[str, float] = {}
 
 COINT_TRIGGER_Z = 1.25
@@ -438,6 +445,28 @@ def _iv_z(mem: dict, product: str, current_iv: float) -> float:
     return (current_iv - mean) / std
 
 
+def _residual_z_update(mem: dict, product: str, residual: float) -> float:
+    """Online z-score for smile residual. Positive = observed IV above fitted smile."""
+    w = mem.setdefault("_res_welford", {})
+    s = w.get(product) or [0, 0.0, 0.0]
+    n0, mean0, m20 = int(s[0]), float(s[1]), float(s[2])
+    z = 0.0
+    if n0 >= 4:
+        var0 = m20 / max(1, n0 - 1)
+        std0 = math.sqrt(var0) if var0 > 0 else 0.0
+        if std0 > 1e-6:
+            z = (float(residual) - mean0) / std0
+    n = n0 + 1
+    mean = mean0
+    m2 = m20
+    delta = float(residual) - mean
+    mean += delta / n
+    m2 += delta * (float(residual) - mean)
+    w[product] = [n, mean, m2]
+    return _clamp(z, -4.0, 4.0)
+
+
+
 # ---------------------------------------------------------------------------
 #  Fallback “median IV” surface (if smile fails)
 # ---------------------------------------------------------------------------
@@ -622,48 +651,104 @@ def _build_bsmile(
     mem: dict,
 ) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float], Dict[str, float], dict]:
     """
-    Returns: fairs, deltas, obs_iv, iv_residual vs smile, updated memory.
+    Returns smile-based fairs/deltas, observed IVs, and IV residuals.
+    Improvement over original:
+      * weights the quadratic smile by liquidity / extrinsic-value reliability
+      * rejects unstable smile fits instead of forcing a noisy parabola
+      * stores fit quality for the execution layer to blend stable vs smile surface
     """
     t = _T_years()
-    m_iv: List[Tuple[float, float]] = []
+    m_iv_w: List[Tuple[float, float, float]] = []
     obs_iv: Dict[str, float] = {}
-    # observed IV + log-moneyness
+
     for prod, k in OPTION_STRIKES.items():
         od = order_depths.get(prod)
         if od is None:
             continue
-        mpx = _book_mid(od)
-        if mpx is None or s <= 0:
+        b, a = _best_bid_ask(od)
+        if b is None or a is None or s <= 0:
             continue
+        mpx = 0.5 * (b + a)
+        spr = max(1.0, float(a - b))
+        intrinsic = max(0.0, s - float(k))
+        extrinsic = mpx - intrinsic
+
+        # Deep ITM quotes have tiny extrinsic value; a 1 tick quote move can explode IV.
+        # Keep them if needed, but down-weight heavily.
         iv0 = implied_vol_bisect(s, float(k), t, RISK_FREE_RATE, mpx)
         if iv0 is None or not (IV_MIN <= iv0 <= IV_MAX):
             continue
-        mm = math.log(float(k) / s)
-        m_iv.append((mm, float(iv0)))
+
+        mone = math.log(float(k) / s)
+        # Higher weight for tight/liquid and non-tiny extrinsic options.
+        extrinsic_w = math.sqrt(max(0.20, extrinsic + 0.50))
+        mone_w = 1.0 / (1.0 + 18.0 * mone * mone)
+        weight = _clamp((extrinsic_w * mone_w) / spr, 0.05, 3.0)
+
+        m_iv_w.append((mone, float(iv0), weight))
         obs_iv[prod] = float(iv0)
         _iv_trail_update(mem, prod, float(iv0))
 
-    fairs, dels, iv_res = {}, {}, {}
-    fq: Optional[Tuple[float, float, float, float]] = (
-        fit_quadratic_smile(m_iv) if (ENABLE_IV_SMILE and len(m_iv) >= SMEAR_MIN_PTS) else None
-    )
+    fairs: Dict[str, float] = {}
+    dels: Dict[str, float] = {}
+    iv_res: Dict[str, float] = {}
+
+    fq: Optional[Tuple[float, float, float, float]] = None
+    if ENABLE_IV_SMILE and len(m_iv_w) >= SMEAR_MIN_PTS:
+        # Weighted least squares for IV = a*m^2 + b*m + c.
+        s11 = s12 = s13 = s22 = s23 = s33 = 0.0
+        t1 = t2 = t3 = 0.0
+        w_sum = 0.0
+        for m, iv, w in m_iv_w:
+            x1 = m * m
+            x2 = m
+            x3 = 1.0
+            s11 += w * x1 * x1
+            s12 += w * x1 * x2
+            s13 += w * x1 * x3
+            s22 += w * x2 * x2
+            s23 += w * x2 * x3
+            s33 += w
+            t1 += w * x1 * iv
+            t2 += w * x2 * iv
+            t3 += w * iv
+            w_sum += w
+        sol = _solve_3x3(s11, s12, s13, s12, s22, s23, s13, s23, s33, t1, t2, t3)
+        if sol is not None:
+            aa, bb, cc = sol
+            se = 0.0
+            for m, iv, w in m_iv_w:
+                pred = aa * m * m + bb * m + cc
+                se += w * (pred - iv) * (pred - iv)
+            mse = se / max(1.0, w_sum)
+            # Guard against wild curvature from noisy wings.
+            center_iv = _clamp(cc, IV_MIN, IV_MAX)
+            curvature_ok = abs(aa) < 25.0
+            center_ok = IV_MIN <= center_iv <= IV_MAX
+            if mse <= SMILE_MSE_CUTOFF and curvature_ok and center_ok:
+                fq = (aa, bb, cc, mse)
+
     if fq is not None:
-        a, b, c, _mse = fq
-        mem["_smile_abc"] = [a, b, c, len(m_iv)]
+        aa, bb, cc, mse = fq
+        mem["_smile_abc"] = [aa, bb, cc, len(m_iv_w)]
+        mem["_smile_fit_mse"] = float(mse)
+        mem["_smile_valid"] = True
         for prod, k in OPTION_STRIKES.items():
             mone = math.log(float(k) / s)
-            iv_fit = _clamp(a * mone * mone + b * mone + c, IV_MIN, IV_MAX)
+            iv_fit = _clamp(aa * mone * mone + bb * mone + cc, IV_MIN, IV_MAX)
             obs = obs_iv.get(prod)
             if obs is not None:
                 iv_res[prod] = float(obs) - float(iv_fit)
             fairs[prod] = bs_call_price(s, float(k), t, RISK_FREE_RATE, iv_fit)
             dels[prod] = bs_call_delta(s, float(k), t, RISK_FREE_RATE, iv_fit)
     else:
-        # Fallback to median-implied one-factor vol surface
+        # Fallback to median-implied one-factor vol surface.
         ff, dd, st = _surface_from_median(s, order_depths, mem)
         mem["_surface"] = st
         fairs, dels = ff, dd
         mem["_smile_abc"] = [0, 0, 0, 0]
+        mem["_smile_fit_mse"] = 999.0
+        mem["_smile_valid"] = False
 
     return fairs, dels, obs_iv, iv_res, mem
 
@@ -749,37 +834,64 @@ def _add_bs_pair_arb(
     pos: Dict[str, int],
     fairs: Dict[str, float],
 ) -> None:
+    """
+    Conservative adjacent-strike relative value.
+    Improvement over original: both legs are sized atomically and edge must exceed
+    the two crossed spreads, so we do not accidentally put on a naked option leg.
+    """
     if not ENABLE_PAIR_ARB_BS or not fairs:
         return
     plan = _planned_positions(pos, result)
+
+    def buy_room(p: str) -> int:
+        return int(_LIMITS.get(p, DEFAULT_LIMIT)) - int(plan.get(p, 0))
+
+    def sell_room(p: str) -> int:
+        return int(_LIMITS.get(p, DEFAULT_LIMIT)) + int(plan.get(p, 0))
+
     for j in range(len(_VEV_LADDER) - 1):
         p0, p1 = _VEV_LADDER[j], _VEV_LADDER[j + 1]
         f0, f1 = fairs.get(p0), fairs.get(p1)
         o0, o1 = ods.get(p0), ods.get(p1)
         if f0 is None or f1 is None or o0 is None or o1 is None:
             continue
-        m0, m1 = _book_mid(o0), _book_mid(o1)
-        if m0 is None or m1 is None:
-            continue
-        theo = f1 - f0
-        mkt = m1 - m0
-        edge = theo - mkt
-        if abs(edge) < PAIR_ARB_MIN_EDGE:
-            continue
         b0, a0 = _best_bid_ask(o0)
         b1, a1 = _best_bid_ask(o1)
         if b0 is None or a0 is None or b1 is None or a1 is None:
             continue
-        if edge > 0.0:  # market spread too small vs model: buy p0, sell p1
-            if _append_if_room(result, plan, p0, a0, PAIR_ARB_QTY) and _append_if_room(
-                result, plan, p1, b1, -PAIR_ARB_QTY
-            ):
-                pass
+
+        m0, m1 = 0.5 * (b0 + a0), 0.5 * (b1 + a1)
+        theo = float(f1) - float(f0)
+        mkt = float(m1) - float(m0)
+        edge = theo - mkt
+        crossing_cost = 0.5 * float(a0 - b0) + 0.5 * float(a1 - b1) + 1.0
+        if abs(edge) < PAIR_ARB_MIN_EDGE + crossing_cost:
+            continue
+
+        if edge > 0.0:
+            # p0 cheap relative to p1: buy p0 at ask, sell p1 at bid.
+            qty = min(
+                PAIR_ARB_QTY,
+                abs(o0.sell_orders[a0]),
+                abs(o1.buy_orders[b1]),
+                buy_room(p0),
+                sell_room(p1),
+            )
+            if qty > 0:
+                _append_if_room(result, plan, p0, a0, int(qty))
+                _append_if_room(result, plan, p1, b1, -int(qty))
         else:
-            if _append_if_room(result, plan, p0, b0, -PAIR_ARB_QTY) and _append_if_room(
-                result, plan, p1, a1, PAIR_ARB_QTY
-            ):
-                pass
+            # p0 rich relative to p1: sell p0 at bid, buy p1 at ask.
+            qty = min(
+                PAIR_ARB_QTY,
+                abs(o0.buy_orders[b0]),
+                abs(o1.sell_orders[a1]),
+                sell_room(p0),
+                buy_room(p1),
+            )
+            if qty > 0:
+                _append_if_room(result, plan, p0, b0, -int(qty))
+                _append_if_room(result, plan, p1, a1, int(qty))
 
 
 # ---------------------------------------------------------------------------
@@ -800,28 +912,41 @@ class Trader:
             sbm = _book_mid(u_od)
             if sbm is not None and sbm > 0:
                 mem["_last_good_S"] = float(sbm)
-        _smf, _smd, obs_iv, iv_res, mem = _build_bsmile(float(s), ods, mem)
-        if USE_STABLE_TRADE_SURFACE:
-            op_f, op_d, st = _surface_from_median(float(s), ods, mem)
-            mem["_surface"] = st
-        else:
-            op_f, op_d = _smf, _smd
-            if not op_f or not op_d:
-                op_f, op_d, st = _surface_from_median(float(s), ods, mem)
-                mem["_surface"] = st
+
+        smile_f, smile_d, obs_iv, iv_res, mem = _build_bsmile(float(s), ods, mem)
+        stable_f, stable_d, st = _surface_from_median(float(s), ods, mem)
+        mem["_surface"] = st
+
+        # Hybrid execution surface: stable surface is the anchor; valid smile contributes edge.
+        op_f: Dict[str, float] = {}
+        op_d: Dict[str, float] = {}
+        smile_valid = bool(mem.get("_smile_valid", False))
+        w_smile = HYBRID_SMILE_WEIGHT if smile_valid else 0.0
+        if not USE_STABLE_TRADE_SURFACE:
+            w_smile = 1.0 if smile_valid else 0.0
+        for pr in OPTION_STRIKES:
+            sf = stable_f.get(pr)
+            sd = stable_d.get(pr)
+            mf = smile_f.get(pr, sf)
+            md = smile_d.get(pr, sd)
+            if sf is None or sd is None:
+                continue
+            op_f[pr] = (1.0 - w_smile) * float(sf) + w_smile * float(mf)
+            op_d[pr] = (1.0 - w_smile) * float(sd) + w_smile * float(md)
+
+        resid_z_map: Dict[str, float] = {}
+        for pr, rr in iv_res.items():
+            resid_z_map[pr] = _residual_z_update(mem, pr, float(rr))
+
         v_hedge = 1.0
         uu = ods.get(UNDERLYING_SYMBOL)
         if uu and _spread(uu) >= WIDE_HEDGE_SPREAD:
             v_hedge = 0.45
-        # aggregate option delta for hedge
+
+        # Aggregate option delta for the light underlying hedge.
         opt_exp = 0.0
         for pr, d in op_d.items():
             opt_exp += float(state.position.get(pr, 0)) * float(d)
-        # underlying mean reversion state
-        if ENABLE_UMR_UNDERLYING and u_od:
-            mpx = _book_mid(u_od)
-            if mpx is not None:
-                _ = _umr_state(mem, float(mpx))
 
         block = _vev_block_risk(state.position)
         res: Dict[str, List[Order]] = {}
@@ -847,6 +972,7 @@ class Trader:
                 option_delta_exposure=opt_exp,
                 iv_z=ziv,
                 iv_res=float(iv_res.get(product, 0.0)),
+                resid_z=float(resid_z_map.get(product, 0.0)),
                 hedge_scale=v_hedge,
             )
             res[product] = orders
@@ -855,6 +981,7 @@ class Trader:
         _add_cointegration_pair_orders(res, ods, state.position)
         _add_bs_pair_arb(res, ods, state.position, op_f)
         return res, 0, json.dumps(mem, separators=(",", ":"))
+
 
     def _adaptive(
         self,
@@ -872,6 +999,7 @@ class Trader:
         option_delta_exposure: float = 0.0,
         iv_z: float = 0.0,
         iv_res: float = 0.0,
+        resid_z: float = 0.0,
         hedge_scale: float = 1.0,
     ) -> Tuple[List[Order], dict]:
         _ = option_delta
@@ -913,17 +1041,21 @@ class Trader:
             rtarget = _clamp((coint_fair - mid) / max(1.0, bte), -1.0, 1.0) * COINT_TARGET_SCALE
         elif option_fair is not None:
             ots = float(OPTION_TARGET_SCALES.get(product, OPTION_TARGET_SCALE))
-            rtarget = _clamp((option_fair - mid) / max(1.0, bte), -1.0, 1.0) * ots
+            model_edge = _clamp((option_fair - mid) / max(1.0, bte), -1.0, 1.0)
+            rtarget = model_edge * ots
         else:
             rtarget = _clamp((fair - mid) / max(1.0, bte), -1.0, 1.0) * rscale
-        # G: if smile edge & IV z disagree, damp
+
+        # G: IV confirmation layer.
+        # Positive residual/z means observed IV is high vs smile => option likely rich => lean short.
         if product.startswith("VEV_") and option_fair is not None and ENABLE_IVR_Z:
             sm_edge = (option_fair - mid) / max(1.0, bte)
             if sm_edge * iv_z < -0.5:
                 rtarget *= 1.0 - SIGNAL_CONFLICT_DAMP
-        if OPTION_TARGET_SCALE > 0.0 and abs(iv_res) > 0.0 and product.startswith("VEV_") and option_fair is not None:
             rtarget = _clamp(
-                rtarget + 0.05 * (iv_res / max(0.1, bte * 0.1)), -1.0, 1.0
+                rtarget - RESIDUAL_Z_TARGET_SCALE * _clamp(resid_z / 2.5, -1.0, 1.0),
+                -MAX_OPTION_TARGET_FRAC,
+                MAX_OPTION_TARGET_FRAC,
             )
         if ENABLE_UMR_UNDERLYING and product == UNDERLYING_SYMBOL:
             umr, _, _ = _umr_state(mem, float(mid))
@@ -965,7 +1097,8 @@ class Trader:
             if c_buy <= 0 or r <= 0:
                 break
             bt = ap <= ex - b_edge
-            mt = option_fair is not None and ap <= option_fair - bte
+            iv_ok_buy = (not product.startswith("VEV_")) or resid_z <= 1.25
+            mt = option_fair is not None and iv_ok_buy and ap <= option_fair - bte
             ct = coint_fair is not None and ap <= coint_fair - bte
             if not (bt or mt or ct):
                 break
@@ -979,7 +1112,8 @@ class Trader:
             if c_sell <= 0 or r <= 0:
                 break
             bt2 = bp >= ex + s_edge
-            mt2 = option_fair is not None and bp >= option_fair + bte
+            iv_ok_sell = (not product.startswith("VEV_")) or resid_z >= -1.25
+            mt2 = option_fair is not None and iv_ok_sell and bp >= option_fair + bte
             ct2 = coint_fair is not None and bp >= coint_fair + bte
             if not (bt2 or mt2 or ct2):
                 break

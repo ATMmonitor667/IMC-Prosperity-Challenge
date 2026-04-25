@@ -856,3 +856,207 @@ Compared with the executable cointegration version:
 This is a deliberate robustness tradeoff. The platform curve previously punished
 optimistic passive-fill overfitting, so the retained objective is not simply maximizing
 `--match-trades all`.
+
+
+16. Addendum: April 25 Hybrid Slow-Anchor / Surface Iteration
+
+This iteration compared the current `trader.py`, `final_trader.py`, `tester.py`, and the
+temporary variants against the same three local Round 3 days.
+
+16.1 Diagnosis
+
+The current two main files had complementary strengths:
+
+- `final_trader.py`: higher default-fill PnL, about 61,382.
+- `trader.py`: higher conservative-fill PnL, about 22,565 with `--match-trades worse`.
+
+The older `tester.py` showed that slow-anchor spot inventory targeting was still valuable
+under default fills, but by itself it was weaker under conservative fills.
+
+16.2 Kept implementation
+
+The accepted hybrid keeps the robust structure from `final_trader.py`:
+
+- EWMA + volatility execution.
+- option surface only as a take trigger / delta source.
+- executable cointegration pair orders only.
+- VEV neighbor residual tilt.
+- VEV block inventory skew.
+
+It adds back the slow-anchor inventory target for the two spot-like books:
+
+- `ALPHA_SLOW_FAIR = 2 / 10001`
+- `WARMUP_TICKS = 20`
+- `INV_SKEW_K = 2.0`
+- `VELVETFRUIT_EXTRACT` slow target scale = 1.20
+- `HYDROGEL_PACK` slow target scale = 1.50
+- soft VELVET delta hedge kept at scale 0.70
+
+16.3 Result
+
+Verified after updating `final_trader.py`:
+
+- `--match-trades all`: 72,934
+- `--match-trades worse`: 22,859
+- `--match-trades none`: 22,727
+
+Compared with the previous main files:
+
+- default-fill PnL improves by about 11.6k versus `final_trader.py`.
+- conservative-fill PnL improves by 294 versus `trader.py`.
+- no-fill-match stress improves by 294 versus both previous main files.
+
+Decision:
+
+- sync the hybrid implementation into both `final_trader.py` and `trader.py`.
+
+
+17. Addendum: April 25 PDF / Option-Surface Reiteration
+
+This iteration used:
+
+- `PROCESS_LOG.txt`
+- `DATA_CONNECTIONS.txt`
+- `POSSIBLE_STRATEGIES_R3.txt`
+- `INSIGHTS.md`
+- `Research algorithms discussion.pdf`
+
+17.1 PDF takeaway
+
+The PDF reinforced the same professional Round 3 theme:
+
+- treat the VEV ladder as call options on the underlying
+- fit an implied-volatility smile/surface
+- trade deviations from that surface carefully
+- use only light delta hedging because full hedging pays too much spread
+- avoid overfitting and respect position limits
+
+The PDF did not justify replacing the whole market-making fair value with Black-Scholes.
+Earlier tests already showed that full option fair replacement was weak. The useful role
+is a bounded surface residual signal layered on top of the working EWMA market maker.
+
+17.2 Current-file diagnosis
+
+During this iteration the active `trader.py` was found to have been switched to the old
+slow-anchor winner, about:
+
+- `--match-trades all`: 74,082
+- `--match-trades worse`: 20,504
+
+That file had the highest optimistic local PnL but no option-surface logic. Because the
+round is explicitly options pricing, and because the conservative stress result was worse,
+I restored the archived option-aware hybrid as the active `trader.py`.
+
+17.3 CSV checks before editing
+
+Option residual analysis:
+
+- `VEV_4000` and `VEV_4500` surface residuals showed the strongest next-tick mean reversion.
+- The wide spreads on those names make direct market taking hard.
+- Tight strikes around `VEV_5200` through `VEV_5500` are more suitable for passive
+  surface-residual skew.
+
+Additional no-arb check:
+
+- executable butterfly violations across the equal-spaced VEV triples were absent in the
+  CSV snapshots
+- direct option-model market taking on the tight strikes had negative next-mid expectancy
+  at low thresholds
+
+Decision:
+
+- do not add butterfly orders
+- do not loosen option market-taking thresholds
+- add option surface residual as a product-specific inventory/quote skew only
+
+17.4 Tested sub-iterations
+
+Broad option target scale:
+
+- scale 0.10: `all` 72,954, `worse` 22,859
+- scale 0.30: `all` 73,000, `worse` 22,859
+- scale 0.60: `all` 73,046, `worse` 22,859
+- scale 1.00: `all` 73,084, `worse` 22,859
+- scale 1.50: `all` about 73,090, `worse` 22,859
+- scale 2.00: `all` about 73,090, `worse` 22,859
+- scale 3.00: `all` 73,058, `worse` 22,859
+
+Product-specific option target scale:
+
+- `VEV_5200`: 3.00
+- `VEV_5300`: 2.00
+- `VEV_5400`: 1.50
+- `VEV_5500`: 2.00
+- `VEV_6000` / `VEV_6500`: 0.00
+
+Result:
+
+- `all`: 73,146
+- `worse`: 22,859
+- `none`: 22,727
+
+Rolling residual-centering test:
+
+- implementation: center option fair by a slow rolling option residual mean
+- result: `all` 72,894, `worse` 22,859
+- decision: reject. It removed useful structural edge from the static smile calibration.
+
+Cointegration threshold check:
+
+- `COINT_ENTRY_Z = 2.0`: `all` 73,010, `worse` 22,835
+- `COINT_ENTRY_Z = 3.0`: `all` 73,080, `worse` 22,836
+- decision: keep `COINT_ENTRY_Z = 2.5`
+
+Warmup check:
+
+- `WARMUP_TICKS = 10`: `all` 73,036, `worse` 22,859
+- `WARMUP_TICKS = 30`: `all` 73,116, `worse` 22,849
+- decision: keep `WARMUP_TICKS = 20`
+
+Delta-hedge scale recheck after option-surface skew:
+
+- scale 0.25: `all` 73,384, `worse` 22,823
+- scale 0.35: `all` 73,300, `worse` 22,823
+- scale 0.40: `all` 73,548, `worse` 22,823
+- scale 0.45: `all` 73,502, `worse` 22,859
+- scale 0.55: `all` 73,272, `worse` 22,859
+
+Decision:
+
+- keep `DELTA_HEDGE_SCALE = 0.45`
+- it preserves the better conservative-fill result while recovering most of the optimistic
+  PnL from lighter hedging
+
+17.5 Final implementation
+
+The active `trader.py` now uses:
+
+- EWMA fair value and volatility per product
+- slow-anchor inventory targeting for VELVET and HYDROGEL
+- Black-Scholes call pricing on the VEV ladder
+- live median total-vol surface stored in `traderData`
+- product-specific option-surface residual quote/inventory skew
+- executable cointegration pair orders
+- soft VELVET delta hedge from aggregate VEV option delta
+- robust missing-book and missing-surface handling
+
+17.6 Final verification
+
+Final active `trader.py`:
+
+- `python -m py_compile trader.py`: passed
+- `--match-trades all`: 73,502
+- `--match-trades worse`: 22,859
+- `--match-trades none`: 22,727
+
+Compared with Section 16:
+
+- default-fill PnL improves from 72,934 to 73,502
+- conservative-fill PnL is unchanged at 22,859
+- no-match stress is unchanged at 22,727
+
+Compared with the old non-option slow-anchor active file:
+
+- default-fill PnL is lower than 74,082
+- conservative-fill PnL is materially better than 20,504
+- the active file now matches the options-pricing structure of the round

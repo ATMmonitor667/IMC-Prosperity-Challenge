@@ -1,0 +1,15 @@
+# Round 3 generated artifacts
+backtests/
+*.log
+
+# Local sweep / experiment scratch files
+__tmp_*.py
+*_tmp.py
+
+# Runtime and tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.dist/
+.sixth/
