@@ -1,0 +1,126 @@
+Round 3 — data files, columns, and how series connect
+=====================================================
+This is a reference for the CSV dumps used in the IMC Prosperity “game” round
+3. It does not change any trading logic; for deeper trading notes see INSIGHTS.md.
+
+
+1. FILE TYPES
+-------------
+(1) prices_round_3_day_D.csv
+    - One file per in-game “day” D (0, 1, 2, … in the published bundle).
+    - Long format: one row per (timestamp, product), so each tick repeats once
+      per listed product.
+    - Separator: semicolon “;”.
+
+(2) trades_round_3_day_D.csv
+    - A sparse tape: each row is a market print, not a full order book.
+    - Timestamp aligns in time with the price grid (same clock as prices).
+    - Separator: “;”.
+
+(3) Optional local layout
+    - The repo may place the same files either directly under the ROUND3 folder
+      or under ROUND3/round3/. A copy may also exist as <project>/round3/ at the
+      repository root. The notebooks look for a CSV in the current directory
+      first, then parents, so start Jupyter with the working directory set to
+      ROUND3/ or ROUND3/notebooks/ to consistently use the round folder. The
+      backtester and notebooks accept either layout, as long as the day index
+      in the filename matches the day you are analyzing.
+
+
+2. PRICES: COLUMN ROLES
+-------------------------
+day
+    - Calendar / session index in the file (duplicated per product row at the
+      same wall-clock tick as “timestamp”).
+
+timestamp
+    - Sequence index for the simulation grid, typically 0 … 999900 in steps
+      of 100 (i.e. 10_000 steps per “day” in the provided sample). This is the
+      natural join key between products and, when you pivot to a wide table,
+      the row index for synchronized mids across all products.
+
+product
+    - Instrument name. There are 12 products in the sample: two “spot-like”
+      names (VELVETFRUIT_EXTRACT, HYDROGEL_PACK) and ten VEV_* names. The
+      VEV_#### part is a strike ladder / index in the design (see INSIGHTS.md),
+      not a literal cash figure like the two spot names.
+
+bid_price_i, bid_volume_i, ask_price_i, ask_volume_i  (i = 1..3 in the sample)
+    - Cumulative limit book: best three levels you can hit or join on each
+      side. Spread in ticks is naturally ask_price_1 - bid_price_1.
+
+mid_price
+    - A mid summary from the same row (in the official dump it is consistent
+      with the book). Use this for a single per-tick mark per product.
+
+profit_and_loss
+    - Populated in live game context; 0.0 in the historical price CSVs.
+
+
+3. TRADES: COLUMN ROLES
+-----------------------
+timestamp
+    - When the print occurred. Connects to the price file by time: you can
+      aggregate how many lots printed per (timestamp, product) and compare
+      to same-tick book in prices_*.
+
+symbol
+    - Same name space as “product” in the prices file (e.g. VEV_5000,
+      HYDROGEL_PACK). Join conceptually on (timestamp, symbol).
+
+price, quantity
+    - Print price and size.
+
+buyer, seller
+    - May be empty in historical dumps; still useful to count activity by time
+      and name.
+
+
+4. LOGICAL CONNECTIONS BETWEEN SERIES
+-------------------------------------
+(1) Same time, different products
+    - All products share the same “timestamp” grid. After pivoting mid_price to
+      columns, each row is a joint snapshot of the whole market at one tick.
+      That is how you compute return correlations, PCA, or neighbor 
+      “surface” structure along VEV_4000 … VEV_6500.
+
+(2) VELVET vs HYDROGEL vs VEV block
+    - Empirically, VELVETFRUIT_EXTRACT and mid-strike VEV names (e.g. 5000,
+      5100) often show strong *same-tick* return correlation in the sample,
+      while HYDROGEL_PACK behaves as a *second* book: roughly much weaker
+      correlation with the VEV ladder. Interpretation: one factor tied to
+      “vol/spot” links VELVET to the center of the ladder; HYDROGEL is more
+      orthogonal in that dump.
+
+(3) Along the VEV ladder
+    - Nearby strike indices tend to have high return correlation, consistent
+      with a smooth “surface” in the strike / vol space. The ladder order is
+      the numeric part after VEV_ (4000, 4500, …, 6500) — *not* the absolute
+      dollar size of the mid, which varies a lot from belly to wing.
+
+(4) % returns vs level
+    - Mids near zero (e.g. some wings) have huge percentage noise with tiny
+      absolute moves; high-dollar spot names have smaller *percentage* wiggle
+      but large tick values. Comparing “volatility” across all names in % space
+      without level normalization mixes scale effects with behavior.
+
+(5) Prices and trades
+    - trades_* tells you *when* something printed; prices_* at the same
+      timestamp has the *book* that the simulator used around that time.
+      Together they help describe active names and liquidity, not a full
+      fill reconstruction.
+
+(6) No automatic link to backtest output
+    - PnL and orders from the official backtester are separate (usually saved
+      as a run log). They are not a column inside these CSVs.
+
+
+5. NOTEBOOKS (folder notebooks/)
+---------------------------------
+- 01_r3_data_overview: schema, per-product spread/mid, optional trades load.
+- 02_r3_correlations_surface: return correlation, VEV block matrix, VELVET
+  vs VEV_5000 lead-lag in ticks.
+
+Set DAY inside each notebook to 0, 1, or 2 to match the files you have on disk.
+Run the Jupyter kernel with the working directory set to either ROUND3/ or
+ROUND3/notebooks/ — the notebooks search parent folders for the CSVs.

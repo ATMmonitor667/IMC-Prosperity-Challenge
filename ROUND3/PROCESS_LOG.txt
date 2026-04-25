@@ -681,3 +681,178 @@ It is better because it leans harder only where the local data consistently supp
 
 - residual mean reversion in the spot-like books
 - wide-spread spread capture in HYDROGEL
+
+
+14. Addendum: April 25 Option Surface and Cointegration Iteration
+
+This iteration was added after the platform curve showed that the previous local high-PnL
+variant was not robust. I changed the process rule for future work: every strategy
+iteration must be recorded in this log, including rejected sub-iterations.
+
+14.1 Problem diagnosis
+
+The 81k local variant was overfit to the local backtester fill model.
+
+Backtest comparison:
+
+- 81,676 under `--match-trades all`
+- 19,761 under `--match-trades worse`
+- 19,698 under `--match-trades none`
+
+The failure mode was extreme passive sizing and slow-anchor residual targeting, especially
+around VELVET/HYDROGEL. It looked good when the simulator granted generous passive fills,
+but it was fragile under more conservative fills and under the platform curve.
+
+14.2 Option-pricing check
+
+I refit the VEV ladder as call options on VELVETFRUIT_EXTRACT.
+
+Useful findings from the CSVs:
+
+- `VEV_####` behaves like a strike ladder.
+- Strikes 5000-5500 imply a stable total-vol surface.
+- Day-level median total vols were approximately:
+  - day 0: 0.0346
+  - day 1: 0.0324
+  - day 2: 0.0298
+- Pure option fair-value replacement was too conservative locally because most of the
+  ladder is internally fair most of the time.
+
+Rejected sub-iteration:
+
+- Replace VEV execution fair with option-surface fair.
+- Result: 47,564 under `all`, 8,286 under `worse`.
+- Decision: reject as a primary fair model.
+
+Kept option-surface role:
+
+- Fit the surface in `traderData`.
+- Use option fair only as an additional clearly-mispriced take trigger.
+- Do not let it drag every passive quote.
+
+14.3 Cointegration research
+
+I then tested OLS hedge ratios of the form:
+
+`y = alpha + beta * x`
+
+The strongest stable relationships were:
+
+- `VEV_4000 = 499.906 + 1.0001 * VEV_4500`, residual std about 0.409.
+- `VELVETFRUIT_EXTRACT = 4501.328 + 0.9982 * VEV_4500`, residual std about 0.758.
+- `VEV_5000 = 70.098 + 1.1086 * VEV_5100`, residual std about 2.663.
+- `VEV_5100 = 42.692 + 1.2990 * VEV_5200`, residual std about 2.188.
+- `VEV_5200 = 24.333 + 1.5230 * VEV_5300`, residual std about 1.850.
+- `VEV_5400 = 3.625 + 1.8560 * VEV_5500`, residual std about 1.159.
+
+The top relationships are not arbitrary statistical artifacts; they are mostly option
+parity and adjacent-strike spread structure.
+
+14.4 Rejected cointegration implementation
+
+First attempt:
+
+- Convert the cointegration beta model into a per-product fair value.
+- Blend that fair into passive quote placement and inventory targeting.
+
+Result:
+
+- 57,731 under `all`
+- 18,780 under `worse`
+- 18,744 under `none`
+
+Decision:
+
+- reject. It overcontrolled passive quotes and damaged the proven market-making edge.
+
+14.5 Kept cointegration implementation
+
+Second attempt:
+
+- Keep the EWMA value/spread market maker as the base.
+- Keep the option surface only as a clear mispricing trigger.
+- Add executable cointegration pair orders only when both legs are tradable at bid/ask
+  with enough edge.
+- Use the beta hedge ratio only for pair sizing and fair spread calculation.
+
+The executable pair logic checks:
+
+- if `y_bid - alpha - beta * x_ask` is large enough, sell `y` and buy `x`
+- if `alpha + beta * x_bid - y_ask` is large enough, buy `y` and sell `x`
+
+This avoids the earlier mistake of turning a statistical residual into a passive quote
+anchor when the executable spread is not actually favorable.
+
+14.6 Final result of this iteration
+
+Kept version:
+
+- `--match-trades all`: 61,306
+- `--match-trades worse`: 22,469
+- `--match-trades none`: 22,433
+
+Compared with the previous robust 61k version:
+
+- local optimistic PnL is essentially unchanged
+- conservative-fill PnL improves slightly
+- the bot now explicitly respects the option-pricing / cointegration structure of Round 3
+
+Final lesson from this iteration:
+
+- the right use of cointegration here is executable spread-aware pair trading
+- the wrong use is broad passive fair-value replacement
+
+
+15. Addendum: April 25 Soft Delta-Hedge Iteration
+
+This iteration used the process log, `DATA_CONNECTIONS.txt`, and `INSIGHTS.md` to focus on
+one professional option-market-making weakness: the bot priced the VEV ladder as calls,
+but it did not explicitly manage aggregate option delta.
+
+15.1 Hypothesis
+
+The VEV ladder is an option surface on VELVETFRUIT_EXTRACT. If the bot accumulates call
+inventory, it inherits VELVET delta. A full forced hedge had already failed earlier, but a
+soft hedge through VELVET quote skew should reduce directional risk without paying the
+spread mechanically every tick.
+
+15.2 Implementation
+
+I added:
+
+- live option delta from the existing fitted total-vol surface
+- aggregate option delta exposure from current VEV positions
+- a VELVET-only target-position adjustment when net delta exceeds a deadband
+
+Important constants:
+
+- `DELTA_HEDGE_DEADBAND = 4.0`
+- `DELTA_HEDGE_SCALE = 0.70`
+
+This is not a hard hedge order. It only changes VELVET inventory pressure inside the
+existing market-making logic.
+
+15.3 Scale check
+
+Small scale check:
+
+- scale 0.25: `all` 60,312, `worse` 22,469
+- scale 0.40: `all` 59,870, `worse` 22,565
+- scale 0.55: `all` 59,959, `worse` 22,565
+- scale 0.70: `all` 60,065, `worse` 22,565
+
+Decision:
+
+- keep scale 0.70 because it keeps the conservative-fill improvement while recovering
+  more optimistic-fill PnL than 0.40 or 0.55.
+
+15.4 Result
+
+Compared with the executable cointegration version:
+
+- `worse` improved from 22,469 to 22,565
+- `all` decreased from 61,306 to about 60,065
+
+This is a deliberate robustness tradeoff. The platform curve previously punished
+optimistic passive-fill overfitting, so the retained objective is not simply maximizing
+`--match-trades all`.

@@ -1,0 +1,124 @@
+Round 3 — possible strategies aligned with the local data analysis
+=================================================================
+This file lists *algorithmic families* that match the patterns described in
+INSIGHTS.md, DATA_CONNECTIONS.txt, and the notebooks. They are *hypotheses*:
+"optimal" in the competition sense is unknown here — each idea must be
+measured in `prosperity4bt` and against the official fee/limit rules.
+
+The historical dump is one sample. Out-of-sample days and the live process may
+differ. Use this as a design menu, not a guarantee.
+
+
+A. PATTERNS THE DATA SUPPORTS (short recap)
+-------------------------------------------
+- VEV_4000 … VEV_6500 show strong *same-tick* return correlation, especially
+  among nearby strike indices: treat the block as a **1-D surface** (smooth
+  across the ladder), not ten independent tickers.
+- VELVET mid changes align most with **VEV_5000 / VEV_5100** returns; HYDROGEL
+  is largely **uncorrelated** with the VEV block — a **second factor** / book.
+- **Lead–lag** at ±1…3 ticks between VELVET and a mid-VEV is ~zero in the
+  sample: do **not** bet on a simple "VELVET moves, next tick I trade VEV" rule.
+- **Half-spread** varies a lot: wide on HYDROGEL / VEV_4000; very tight on
+  wings. Edge must be **per-product** in tick units after fees.
+- **Percentage** volatility is misleading across names (low $ mids vs high $):
+  use **absolute** prices / ticks for risk and for signals that compare
+  products, or normalize explicitly (e.g. divide by mid, or use per-name
+  scaling).
+
+
+B. STRATEGY FAMILIES (POSSIBLE ALGORITHMS)
+------------------------------------------
+
+1) VEV "surface" residual / neighbor mean reversion
+   Idea: A strike’s fair level is *predicted* from neighbors (or from a smooth
+   fit). Trade when the **residual** (actual mid minus prediction) is large vs
+   a rolling noise estimate.
+   Variants:
+   - **k-neighbor**: fair_i = mean or weighted mean of mid at i±1, i±2.
+   - **Spline / polynomial in strike index**: map strike key 4000…6500 to fitted
+     curve; residual = mid - spline(t).
+   - **PCA (first factors) on VEV mids or returns**: residual = idiosyncratic
+     part after projecting onto leading PCs.
+   Entry: |residual| > threshold; exit when residual decays (or time stop).
+   Why it fits the data: high co-movement suggests a **shared level**; mean
+   reversion in *shape* (not raw % return on a single name) is plausible.
+
+2) Pair or basket on the VEV ladder
+   Idea: Trade **spreads** between two strikes (long underperformer vs short
+   outperformer) over short horizons, if short-term *relative* moves are more
+   mean-reverting than the block drift.
+   Fit: co-movement makes pairs **hedged in factor space**; still check each
+   leg’s **spread + limits**.
+
+3) VELVET ↔ mid-VEV *beta* (same-tick, not lead–lag)
+   Idea: Regress (or EWM) VELVET returns on VEV_5000/VEV_5100 returns. Trade
+   **mispricing** of the relationship (residual of the regression) since the
+   sample shows strong *contemporaneous* correlation, not next-tick timing.
+   Caution: avoid over-parameterizing; update beta slowly; cap exposure.
+
+4) HYDROGEL as a separate process
+   Idea: **Do not** use VEV signals to trade HYDROGEL (and vice versa) unless
+   you re-verify correlation on every day. Run a **dedicated** model: e.g. mid
+   momentum / mean reversion in **absolute** ticks, or a wide-spread
+   pass-through market maker (see 6) with its own vol estimate.
+
+5) Scale-aware per-name rules
+   Idea: For each product, use **own** ATR/rolling std in **dollar or tick
+   units** (or returns with a *per-name* scale factor). Reject a single global
+   "% return" z-score for all VEV_*.
+
+6) Spread- and limit-aware market making
+   Idea: For each name, set quote width ≥ max(ε, k * half_spread) or similar,
+   and size inversely to spread and to inventory. **Prioritize** names where
+   the book is **tight** in the sample (e.g. some belly/wing VEV) if the game
+   rewards flow there; for **wide** names, either skip passive quoting or
+   **widen a lot** and post rarely.
+   Fit: the analysis stresses **per-product** economics.
+
+7) Wing names (e.g. VEV_6000 / VEV_6500): static mids, tiny spread
+   Idea: In the dump these look almost **static** with 1-tick spread — little
+   directional edge, but possibly **low adverse selection** for tiny spread
+   capture if the simulator still fills. Alternatively **avoid** if inventory
+   risk outweighs a tick.
+   This is a **process** judgment, not a universal rule.
+
+8) Multi-day / rolling regime
+   Idea: Keep **per-day** or **EWM** stats (mean level of spread, mean mid,
+   correlation matrix) and **widen** or **disable** strats when the current day
+   diverges (INSIGHTS: compare day 0 vs 1 vs 2 shape).
+   Implementation: re-estimate VELVET–VEV beta and VEV surface smoothness
+   online; freeze when unstable.
+
+9) Trade tape *rate* (optional overlay)
+   Idea: On ticks where **trades_*** shows more prints in a name, you may be
+   in a **active** sub-period — use as **sizing** or **width** modulator, not
+   as a sole price signal, unless you validate predictive power in backtest.
+
+10) "No simple latency" constraint
+   Idea: Favor **same-tick** or **bar-level** features (e.g. current mid,
+   last few mids, spread, VEV block snapshot). Avoid **multi-tick** prediction
+   chains that only worked in your imagination, unless you prove edge in
+   `run_bt` logs.
+
+11) Inventory / risk budget across 12 names
+   Idea: A single **exposure** cap per name + **factor** cap on the whole VEV
+   block (net exposure along the ladder) to avoid being picked off when the
+   surface jumps together.
+
+
+C. HOW TO RANK CANDIDATES
+--------------------------
+- Backtest with **per-day** and **merged** PnL; remember merged Sharpe on few
+  days is a *consistency* diagnostic, not a fund Sharpe (see ROUND2 notes).
+- Compare **gross** vs **fees**; scale positions to **limit** and half-spread.
+- Stress **day 0 / 1 / 2** separately — surface and beta may be unstable.
+
+
+D. PAIRING WITH THE REPO
+-------------------------
+- `analyze_r3_data.py` + `notebooks/02_r3_correlations_surface.ipynb` help you
+  re-check correlations, vol scale, and lead–lag when you add a new idea.
+- `INSIGHTS.md` remains the single place for product-role intuition and the
+  Magritte / ladder warning.
+
+This file is descriptive only: it does not modify the submission bot.
