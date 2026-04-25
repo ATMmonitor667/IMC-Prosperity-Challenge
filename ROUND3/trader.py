@@ -6,9 +6,10 @@ The historical books show 12 products:
 
 `analyze_r3_data.py` / `INSIGHTS.md` in this folder document correlations and mean spreads
 used to set per-name edge and size multipliers. Final tuned version is a pure value/spread
-maker: EWMA fair + vol-scaled take / make + tighter inventory control, with a mild
-residual-based inventory target on the two spot-like books. The drift leg remains
-effectively disabled because it hurt out-of-sample backtests on the local round 3 days.
+maker: EWMA fair + vol-scaled take / make + tight inventory control, with a slow-anchor
+residual inventory target on the spot-like books and the liquid VEV ladder. The drift leg
+remains effectively disabled because it hurt out-of-sample backtests on the local round 3
+days.
 
 Tweak `LIMITS` to match the official IMC per-product cap table.
 """
@@ -40,17 +41,26 @@ _LIMITS: Dict[str, int] = {
 
 HORIZON = 100
 ALPHA_FAIR = 2.0 / (60.0 + 1.0)
+ALPHA_SLOW_FAIR = 2.0 / (20000.0 + 1.0)
 ALPHA_VOL = 2.0 / (100.0 + 1.0)
-WARMUP_TICKS = 100
+WARMUP_TICKS = 20
 
-MICRO_TILT = 0.3
+MICRO_TILT = 0.28
 DRIFT_TARGET_SCALE = 2.0
 DRIFT_T_THRESHOLD = 10.0
-INV_SKEW_K = 1.0
+INV_SKEW_K = 4.0
 ANTI_TREND_BARRIER_MULT = 3.0
 RESIDUAL_TARGET_SCALES: Dict[str, float] = {
-    "VELVETFRUIT_EXTRACT": 1.05,
-    "HYDROGEL_PACK": 0.45,
+    "VELVETFRUIT_EXTRACT": 1.6,
+    "HYDROGEL_PACK": 1.2,
+    "VEV_4000": 0.6,
+    "VEV_4500": 0.6,
+    "VEV_5000": 1.0,
+    "VEV_5100": 1.0,
+    "VEV_5200": 1.0,
+    "VEV_5300": 1.0,
+    "VEV_5400": 0.6,
+    "VEV_5500": 0.6,
 }
 
 
@@ -78,7 +88,7 @@ def _edge_config(product: str, mid: float) -> EdgeConfig:
     )
     if product == "HYDROGEL_PACK":
         c.min_take = max(c.min_take, 8)
-        c.min_make = max(c.min_make, 4)
+        c.min_make = max(c.min_make, 5)
         c.k_make = 0.42
         c.take_frac = 0.18
         c.make_frac = 0.19
@@ -88,8 +98,8 @@ def _edge_config(product: str, mid: float) -> EdgeConfig:
         c.min_take = max(c.min_take, 4)
         c.min_make = max(c.min_make, 2)
         c.k_make = 0.45
-        c.take_frac = 0.14
-        c.make_frac = 0.10
+        c.take_frac = 0.04
+        c.make_frac = 0.40
         c.vol_floor = 0.5
     elif product.startswith("VEV_"):
         if product in {"VEV_5000", "VEV_5100"}:
@@ -164,6 +174,11 @@ def _update_online_state(state: dict, mid: float, vol_floor: float) -> dict:
     else:
         new_fair = ALPHA_FAIR * mid + (1.0 - ALPHA_FAIR) * prev_fair
     state["fair"] = new_fair
+    prev_slow = state.get("slow_fair")
+    if prev_slow is None:
+        state["slow_fair"] = mid
+    else:
+        state["slow_fair"] = ALPHA_SLOW_FAIR * mid + (1.0 - ALPHA_SLOW_FAIR) * prev_slow
     state["prev_mid"] = mid
 
     if prev_mid is None:
@@ -255,7 +270,8 @@ class Trader:
 
         base_take_edge = max(float(ec.min_take), ec.k_take * vol)
         residual_scale = float(RESIDUAL_TARGET_SCALES.get(product, 0.0))
-        residual_target = _clamp((fair - mid) / max(1.0, base_take_edge), -1.0, 1.0) * residual_scale
+        slow_fair = float(pstate.get("slow_fair", fair))
+        residual_target = _clamp((slow_fair - mid) / max(1.0, base_take_edge), -1.0, 1.0) * residual_scale
         target_frac = _clamp(target_frac + residual_target, -1.0, 1.0)
         make_edge = max(float(ec.min_make), ec.k_make * vol)
         if effective_drift > 0:
