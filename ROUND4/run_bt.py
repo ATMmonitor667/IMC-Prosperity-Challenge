@@ -1,7 +1,8 @@
 """Prosperity 4 backtester wrapper (`prosperity4bt`).
 
   cd ROUND4
-  python run_bt.py trader.py 4-0 4-1
+  # Day index matches CSV filename: 4-1 -> prices_round_4_day_1.csv (4-0 has no data).
+  python run_bt.py trader.py 4-1 4-2
   # or:  python -m prosperity4bt trader.py 4-0 --data <parent-of-round4>
 
 `prosperity4bt` loads data from::
