@@ -69,6 +69,7 @@ class Variant:
     name: str
     flags: Dict[str, bool] = field(default_factory=dict)
     constants: Dict[str, Any] = field(default_factory=dict)
+    dict_constants: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     active_products: Optional[Set[str]] = None
     simple_s_hat: bool = False
     monotone_vev: bool = True
@@ -121,6 +122,43 @@ def set_constant(src: str, name: str, value: Any) -> str:
     if count != 1:
         raise ValueError(f"could not set constant {name}")
     return out
+
+
+def literal(value: Any) -> str:
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    return repr(value)
+
+
+def set_dict_entry(src: str, dict_name: str, key: str, value: Any) -> str:
+    """Patch one simple literal value inside a top-level dict assignment."""
+    m = re.search(rf"^{re.escape(dict_name)}(?:\s*:\s*[^=]+)?\s*=\s*\{{", src, flags=re.MULTILINE)
+    if not m:
+        raise ValueError(f"could not find dict {dict_name}")
+
+    start = m.end() - 1
+    depth = 0
+    end = None
+    for i in range(start, len(src)):
+        ch = src[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end is None:
+        raise ValueError(f"could not parse dict {dict_name}")
+
+    block = src[start:end]
+    key_pat = re.escape(str(key))
+    pattern = rf"(?P<prefix>[\"']{key_pat}[\"']\s*:\s*)(?P<value>[^,\n}}]+)"
+    repl = rf"\g<prefix>{literal(value)}"
+    new_block, count = re.subn(pattern, repl, block, count=1)
+    if count != 1:
+        raise ValueError(f"could not set {dict_name}[{key!r}]")
+    return src[:start] + new_block + src[end:]
 
 
 def inject_extra_switches(src: str) -> str:
@@ -267,6 +305,10 @@ def apply_variant(src: str, variant: Variant) -> str:
             name = "EDGE_SPREAD_MULT"
         src = set_constant(src, name, value)
 
+    for dict_name, updates in variant.dict_constants.items():
+        for key, value in updates.items():
+            src = set_dict_entry(src, dict_name, key, value)
+
     return src
 
 
@@ -282,6 +324,10 @@ def parse_stdout(stdout: str) -> Tuple[Dict[str, Dict[str, float]], Dict[str, fl
 
     for raw in stdout.splitlines():
         line = raw.strip()
+        if line == "Profit summary:":
+            current_day = None
+            continue
+
         day_match = re.search(r"Backtesting .* round 4 day (-?\d+)", line)
         if day_match:
             current_day = f"4-{day_match.group(1)}"
@@ -702,9 +748,23 @@ def structure_refine() -> List[Variant]:
         Variant("S_no_second_level", flags={**flags, "ENABLE_SECOND_LEVEL_QUOTES": False}),
         Variant("S_second_level_on", flags={**flags, "ENABLE_SECOND_LEVEL_QUOTES": True}),
         Variant("S_inventory_bucket_on", flags={**flags, "ENABLE_INVENTORY_BUCKET_SIZING": True}),
+        Variant("S_resid_side_gate_off", flags=flags, constants={"RESID_SIDE_GATE": False}),
+        Variant("S_resid_side_gate_050", flags=flags, constants={"RESID_SIDE_GATE": True, "RESID_SIDE_THRESHOLD": 0.50}),
+        Variant("S_resid_side_gate_075", flags=flags, constants={"RESID_SIDE_GATE": True, "RESID_SIDE_THRESHOLD": 0.75}),
+        Variant("S_resid_side_gate_100", flags=flags, constants={"RESID_SIDE_GATE": True, "RESID_SIDE_THRESHOLD": 1.00}),
+        Variant("S_resid_opp_edge_05", flags=flags, constants={"RESID_SIDE_GATE": True, "RESID_OPPOSITE_EDGE_ADD": 0.50}),
+        Variant("S_resid_opp_edge_10", flags=flags, constants={"RESID_SIDE_GATE": True, "RESID_OPPOSITE_EDGE_ADD": 1.00}),
+        Variant("S_resid_opp_edge_15", flags=flags, constants={"RESID_SIDE_GATE": True, "RESID_OPPOSITE_EDGE_ADD": 1.50}),
         Variant("S_vertical_off", flags={**flags, "ENABLE_VERTICAL_TILT": False}),
+        Variant("S_vertical_sanity_off", flags={**flags, "ENABLE_VERTICAL_SANITY": False}),
+        Variant("S_vertical_sanity_on", flags={**flags, "ENABLE_VERTICAL_SANITY": True, "ENABLE_VERTICAL_TILT": False}),
         Variant("S_vertical_005", flags={**flags, "ENABLE_VERTICAL_TILT": True}, constants={"VERTICAL_TILT_STRENGTH": 0.05}),
         Variant("S_vertical_010", flags={**flags, "ENABLE_VERTICAL_TILT": True}, constants={"VERTICAL_TILT_STRENGTH": 0.10}),
+        Variant("S_per_product_edge_off", flags={**flags, "ENABLE_PER_PRODUCT_MAKER_EDGE": False}),
+        Variant("S_per_product_edge_on", flags={**flags, "ENABLE_PER_PRODUCT_MAKER_EDGE": True}),
+        Variant("S_quote_all_hybrid", flags=flags, constants={"QUOTE_STYLE": "hybrid"}),
+        Variant("S_quote_all_join", flags=flags, constants={"QUOTE_STYLE": "join"}),
+        Variant("S_quote_all_improve", flags=flags, constants={"QUOTE_STYLE": "improve"}),
         Variant("S_s_hat_global", flags=flags, constants={"S_HAT_MODE": "global"}),
         Variant("S_s_hat_strike_local", flags=flags, constants={"S_HAT_MODE": "strike_local"}),
         Variant("S_tv_ema", flags=flags, constants={"TV_MODE": "ema"}),
@@ -714,6 +774,90 @@ def structure_refine() -> List[Variant]:
         Variant("S_endgame_off", flags={**flags, "ENABLE_ENDGAME": False}),
         Variant("S_endgame_last_5k", flags=flags, constants={"ENDGAME_MODE": "normal_until_last_5k"}),
         Variant("S_inventory_reducing_taker", flags={**flags, "ENABLE_INVENTORY_REDUCING_TAKER": True}),
+    ]
+
+
+def adaptive_refine() -> List[Variant]:
+    flags = best_feature_flags()
+    off = {
+        "ENABLE_ADAPTIVE_MARKOUT": False,
+        "ENABLE_ADAPTIVE_CONFIDENCE": False,
+        "ENABLE_ADAPTIVE_STATE_MACHINE": False,
+        "ENABLE_QUOTE_SCORING": False,
+        "ENABLE_TARGET_INVENTORY": False,
+        "ENABLE_STRIP_BALANCE": False,
+        "ENABLE_ADAPTIVE_SECOND_LEVEL": False,
+    }
+    return [
+        Variant("AM_baseline_current", flags=flags, notes="current trader.py constants"),
+        Variant("AM_static_no_adaptive", flags={**flags, **off}),
+        Variant("AM_adaptive_markout_only", flags={**flags, **off, "ENABLE_ADAPTIVE_MARKOUT": True}),
+        Variant("AM_adaptive_confidence_only", flags={**flags, **off, "ENABLE_ADAPTIVE_CONFIDENCE": True}),
+        Variant("AM_target_inventory_only", flags={**flags, **off, "ENABLE_TARGET_INVENTORY": True}),
+        Variant("AM_quote_scoring_only", flags={**flags, **off, "ENABLE_QUOTE_SCORING": True}),
+        Variant("AM_state_machine_only", flags={**flags, **off, "ENABLE_ADAPTIVE_MARKOUT": True, "ENABLE_ADAPTIVE_STATE_MACHINE": True}),
+        Variant("AM_all_adaptive", flags={
+            **flags,
+            "ENABLE_ADAPTIVE_MARKOUT": True,
+            "ENABLE_ADAPTIVE_CONFIDENCE": True,
+            "ENABLE_ADAPTIVE_STATE_MACHINE": True,
+            "ENABLE_QUOTE_SCORING": True,
+            "ENABLE_TARGET_INVENTORY": True,
+            "ENABLE_STRIP_BALANCE": True,
+            "ENABLE_ADAPTIVE_SECOND_LEVEL": False,
+        }),
+    ]
+
+
+def adaptive_horizon() -> List[Variant]:
+    flags = best_feature_flags()
+    return [
+        Variant(f"AH_markout_horizon_{h}", flags=flags, constants={"MARKOUT_HORIZON": h})
+        for h in [20, 50, 100]
+    ]
+
+
+def adaptive_strength() -> List[Variant]:
+    flags = best_feature_flags()
+    variants: List[Variant] = []
+    for v in [1.0, 1.5, 2.0]:
+        variants.append(Variant(f"AS_edge_max_{v}", flags=flags, constants={"ADAPT_EDGE_MAX": v}))
+    for v in [-0.25, -0.5, -0.75]:
+        variants.append(Variant(f"AS_edge_min_{v}", flags=flags, constants={"ADAPT_EDGE_MIN": v}))
+    for v in [1.25, 1.5]:
+        variants.append(Variant(f"AS_size_max_{v}", flags=flags, constants={"ADAPT_SIZE_MAX": v}))
+    for v in [0.0, 0.25, 0.5, 0.75]:
+        variants.append(Variant(f"AS_score_threshold_{v}", flags=flags, constants={"SCORE_THRESHOLD": v}))
+    return variants
+
+
+def adaptive_target() -> List[Variant]:
+    flags = best_feature_flags()
+    variants: List[Variant] = []
+    for v in [0.25, 0.5, 0.75]:
+        variants.append(Variant(f"AT_target_strength_{v}", flags=flags, constants={"TARGET_INV_STRENGTH": v}))
+    for v in [0.3, 0.5, 0.6]:
+        variants.append(Variant(f"AT_vev_target_strength_{v}", flags=flags, constants={"TARGET_INV_VEV_STRENGTH": v}))
+    return variants
+
+
+def static_calibration() -> List[Variant]:
+    """Small coordinate-search suite around the restored static maker bot."""
+    return [
+        Variant("SC_current_calibrated", notes="current trader.py constants"),
+        Variant("SC_per_product_edge_off", flags={"ENABLE_PER_PRODUCT_MAKER_EDGE": False}),
+        Variant(
+            "SC_size_5200_5300_2",
+            dict_constants={"SIZE_BY_PRODUCT": {"VEV_5200": 2, "VEV_5300": 2}},
+        ),
+        Variant("SC_resid_opp_edge_10", constants={"RESID_OPPOSITE_EDGE_ADD": 1.0}),
+        Variant("SC_vertical_off", flags={"ENABLE_VERTICAL_SANITY": False}),
+        Variant("SC_vertical_edge_025", constants={"VERTICAL_EDGE_ADJ": 0.25}),
+        Variant("SC_vertical_edge_05", constants={"VERTICAL_EDGE_ADJ": 0.5}),
+        Variant("SC_tv_ema", constants={"TV_MODE": "ema"}),
+        Variant("SC_tv_fixed", constants={"TV_MODE": "fixed"}),
+        Variant("SC_tv_hybrid_70_30", constants={"TV_MODE": "hybrid_70_30"}),
+        Variant("SC_inventory_reducing_taker", flags={"ENABLE_INVENTORY_REDUCING_TAKER": True}),
     ]
 
 
@@ -754,17 +898,37 @@ def build_suite(name: str) -> List[Variant]:
         return vev_refine()
     if name == "structure_refine":
         return structure_refine()
+    if name == "adaptive_refine":
+        return adaptive_refine()
+    if name == "adaptive_horizon":
+        return adaptive_horizon()
+    if name == "adaptive_strength":
+        return adaptive_strength()
+    if name == "adaptive_target":
+        return adaptive_target()
+    if name == "static_calibration":
+        return static_calibration()
     if name == "combos":
         return combos()
     if name == "all":
-        return baselines() + ablations() + combos() + maker_refine() + vev_refine() + structure_refine() + param_sweeps()
+        return (
+            baselines() + ablations() + combos() + maker_refine() + vev_refine()
+            + structure_refine() + adaptive_refine() + adaptive_horizon()
+            + adaptive_strength() + adaptive_target() + static_calibration()
+            + param_sweeps()
+        )
     raise ValueError(f"unknown suite {name}")
 
 
 def all_named_variants() -> List[Variant]:
     seen = set()
     out: List[Variant] = []
-    for suite in ["baselines", "ablations", "combos", "maker_refine", "vev_refine", "structure_refine", "params", "params_best", "params_best_make075"]:
+    for suite in [
+        "baselines", "ablations", "combos", "maker_refine", "vev_refine",
+        "structure_refine", "adaptive_refine", "adaptive_horizon",
+        "adaptive_strength", "adaptive_target", "static_calibration",
+        "params", "params_best", "params_best_make075",
+    ]:
         for variant in build_suite(suite):
             if variant.name not in seen:
                 seen.add(variant.name)
@@ -866,7 +1030,16 @@ def print_table(rows: List[Dict[str, Any]]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["baselines", "ablations", "combos", "maker_refine", "vev_refine", "structure_refine", "params", "params_best", "params_best_make075", "all"], default="baselines")
+    parser.add_argument(
+        "--suite",
+        choices=[
+            "baselines", "ablations", "combos", "maker_refine", "vev_refine",
+            "structure_refine", "adaptive_refine", "adaptive_horizon",
+            "adaptive_strength", "adaptive_target", "static_calibration",
+            "params", "params_best", "params_best_make075", "all",
+        ],
+        default="baselines",
+    )
     parser.add_argument("--variant", help="run one exact named variant from any suite")
     parser.add_argument("--only", help="run variants whose name contains this substring")
     parser.add_argument("--days", nargs="*", help="override day list, e.g. 4-1 4-2 4-3")

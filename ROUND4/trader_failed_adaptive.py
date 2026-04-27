@@ -1,13 +1,14 @@
-"""Prosperity 4 Round 4 trader (v3 — static maker-first hybrid).
+"""Prosperity 4 Round 4 trader (v3 - maker-first hybrid).
 
-Proven pre-adaptive baseline lives in ``trader_before_adaptive_maker.py`` (and
-``trader_failed_adaptive.py`` holds the discarded quote-scoring / target-inventory
-variant). This file keeps that architecture: reservation Book, VEV ladder,
-maker-only alpha, no online markout or adaptive state machine.
-
-Static calibration (product maker edges, sizes, hybrid TV, mild vertical sanity)
-is the only layer on top of the baseline — no quote scoring, strip balance, or
-full takers.
+Measured direction:
+- Per-tick reservation accounting (Book) is the single source of capacity.
+- HYDROGEL remains the main independent market-making book.
+- VELVET plus deep ITM VEV anchors feed the VEV fair-value ladder.
+- Maker quotes drive PnL; aggressive taker logic is disabled by default.
+- Delta hard gates, VELVET hedge pressure, and adverse-selection skips are disabled.
+- Residual VEV tilt, MR, dynamic maker edges, TV updates, and inventory skew stay active.
+- Lightweight diagnostics counters in traderData.
+- Feature flags for clean ablation.
 
 Runtime depends only on the prosperity datamodel.
 """
@@ -37,14 +38,6 @@ ENABLE_VELVET_HEDGE_PRESSURE = False
 ENABLE_TAKER = False
 ENABLE_MAKER = True
 ENABLE_MONOTONIC_VEV_FAIR = True
-
-# Explicitly keep the failed adaptive-maker machinery disabled. These switches
-# are intentionally inert in this static bot if no corresponding code exists.
-ENABLE_QUOTE_SCORING = False
-ENABLE_ADAPTIVE_MARKOUT = False
-ENABLE_ADAPTIVE_CONFIDENCE = False
-ENABLE_ADAPTIVE_STATE_MACHINE = False
-ENABLE_STRIP_BALANCE = False
 
 # Test switches; None means trade every listed product.
 ACTIVE_PRODUCTS = None
@@ -167,8 +160,6 @@ QUOTE_STYLE_BY_PRODUCT = {
     "VEV_5300": "hybrid",
     "VEV_5400": "hybrid",
     "VEV_5500": "hybrid",
-    "VEV_6000": "hybrid",
-    "VEV_6500": "hybrid",
 }
 SIDE_EDGE_ADJ = {
     "HYDROGEL_PACK": {"bid": 0.0, "ask": 0.0},
@@ -181,8 +172,6 @@ SIDE_EDGE_ADJ = {
     "VEV_5300": {"bid": 0.0, "ask": 0.0},
     "VEV_5400": {"bid": 0.0, "ask": 0.0},
     "VEV_5500": {"bid": 0.0, "ask": 0.0},
-    "VEV_6000": {"bid": 0.0, "ask": 0.0},
-    "VEV_6500": {"bid": 0.0, "ask": 0.0},
 }
 
 # Step 5: per-product, per-side activation. Default all True so disabling a side
@@ -199,8 +188,6 @@ ACTIVE_SIDES: Dict[str, Dict[str, bool]] = {
     "VEV_5300":           {"bid": True, "ask": True},
     "VEV_5400":           {"bid": True, "ask": True},
     "VEV_5500":           {"bid": True, "ask": True},
-    "VEV_6000":           {"bid": True, "ask": True},
-    "VEV_6500":           {"bid": True, "ask": True},
 }
 
 # Step 6: residual side gate. Replaces vertical tilt's coarse fair shift with a
@@ -210,34 +197,31 @@ ACTIVE_SIDES: Dict[str, Dict[str, bool]] = {
 #   |rz| > hard_threshold            -> disable opposite side outright
 RESID_SIDE_GATE = True
 RESID_SIDE_THRESHOLD = 0.75
-RESID_OPPOSITE_EDGE_ADD = 0.5
-RESID_HARD_THRESHOLD = 2.0
+RESID_OPPOSITE_EDGE_ADD = 1.0
+RESID_HARD_THRESHOLD = 1.5
 
 # Step 7: vertical no-arbitrage sanity. Lightweight per-side edge nudge for
 # adjacent strike pairs based on (mid_K1 - mid_K2) - (fair_K1 - fair_K2).
 ENABLE_VERTICAL_SANITY = True
-VERTICAL_EDGE_ADJ = 0.50
+VERTICAL_EDGE_ADJ = 0.5
 VERTICAL_SIGNAL_THRESHOLD = 1.5
 VERTICAL_SANITY_SPREAD_CAP = 6  # skip pair if either spread > this
 
 # Steps 8-9: per-product maker edge multipliers. Default flag off so the global
 # MAKE_EDGE_MULT / MAKE_EDGE_VOL_MULT continue to govern edges (preserves the
 # 1600 baseline). Flip ENABLE_PER_PRODUCT_MAKER_EDGE to switch to the dicts.
-ENABLE_PER_PRODUCT_MAKER_EDGE = True
-ENABLE_PER_PRODUCT_MAKER_VOL_EDGE = False
+ENABLE_PER_PRODUCT_MAKER_EDGE = False
 MAKE_EDGE_MULT_BY_PRODUCT: Dict[str, float] = {
-    "HYDROGEL_PACK": 0.60,
+    "HYDROGEL_PACK": 0.65,
     "VELVETFRUIT_EXTRACT": 0.75,
-    "VEV_4000": 0.60,
-    "VEV_4500": 0.60,
+    "VEV_4000": 0.65,
+    "VEV_4500": 0.65,
     "VEV_5000": 0.75,
-    "VEV_5100": 0.80,
+    "VEV_5100": 0.75,
     "VEV_5200": 0.85,
     "VEV_5300": 0.85,
     "VEV_5400": 1.00,
-    "VEV_5500": 1.10,
-    "VEV_6000": 999.0,
-    "VEV_6500": 999.0,
+    "VEV_5500": 1.00,
 }
 MAKE_EDGE_VOL_MULT_BY_PRODUCT: Dict[str, float] = {
     "HYDROGEL_PACK": 0.05,
@@ -250,19 +234,49 @@ MAKE_EDGE_VOL_MULT_BY_PRODUCT: Dict[str, float] = {
     "VEV_5300": 0.10,
     "VEV_5400": 0.12,
     "VEV_5500": 0.12,
-    "VEV_6000": 0.08,
-    "VEV_6500": 0.08,
 }
 
 # Step 13: target-inventory skew. When on, the maker skew center moves from 0
 # toward a product-specific target derived from mean-reversion z (HYDRO) or
 # residual z (VEVs). Default off until backtested.
-ENABLE_TARGET_INVENTORY = False
+ENABLE_TARGET_INVENTORY = True
 TARGET_INV_STRENGTH = 0.5
 TARGET_INV_VEV_STRENGTH = 0.5  # extra dampener for VEVs (small target on ATM/cheap)
+TARGET_INV_EDGE_ADJ = 0.45
 
-# Maker sizes by product. Static table beats online size mutation here; normal
-# reservation and limit clamping still apply every tick.
+# Adaptive maker engine. It learns compact product/side markout quality from
+# own fills and only changes maker edge/size; it never opens through takers.
+ENABLE_ADAPTIVE_MARKOUT = True
+ENABLE_ADAPTIVE_CONFIDENCE = True
+ENABLE_ADAPTIVE_STATE_MACHINE = True
+ENABLE_QUOTE_SCORING = True
+ENABLE_STRIP_BALANCE = True
+ENABLE_ADAPTIVE_SECOND_LEVEL = False
+MARKOUT_HORIZON = 50
+MARKOUT_PENDING_MAX = 100
+MARKOUT_SEEN_MAX = 240
+MARKOUT_ALPHA = 0.05
+ADAPT_MIN_FILLS = 5
+ADAPT_STRONG_FILLS = 10
+ADAPT_GOOD_MARKOUT = 0.5
+ADAPT_BAD_MARKOUT = -0.5
+ADAPT_TOXIC_MARKOUT = -1.5
+ADAPT_GOOD_WIN = 0.55
+ADAPT_BAD_WIN = 0.45
+ADAPT_EDGE_MIN = -0.75
+ADAPT_EDGE_MAX = 2.0
+ADAPT_SIZE_MIN = 0.25
+ADAPT_SIZE_MAX = 1.5
+ADAPT_COOLDOWN_TICKS = 500
+SCORE_THRESHOLD = 0.0
+CONF_LOW = 0.45
+CONF_SKIP = 0.25
+CONF_EDGE_PENALTY = 0.75
+CONF_SIZE_MIN = 0.50
+STRIP_BALANCE_THRESHOLD = 0.55
+STRIP_BALANCE_EDGE = 0.50
+
+# Maker sizes by product group.
 HYDRO_SIZE = 5
 VELVET_SIZE = 4
 DEEP_VEV_SIZE = 2
@@ -270,24 +284,10 @@ ATM_VEV_SIZE = 2
 CHEAP_VEV_SIZE = 1
 WING_BID_SIZE = 2
 WING_UNWIND_SIZE = 4
-SIZE_BY_PRODUCT: Dict[str, int] = {
-    "HYDROGEL_PACK": 5,
-    "VELVETFRUIT_EXTRACT": 4,
-    "VEV_4000": 2,
-    "VEV_4500": 2,
-    "VEV_5000": 2,
-    "VEV_5100": 2,
-    "VEV_5200": 1,
-    "VEV_5300": 1,
-    "VEV_5400": 1,
-    "VEV_5500": 1,
-    "VEV_6000": 1,
-    "VEV_6500": 1,
-}
 ENABLE_INVENTORY_BUCKET_SIZING = False
 
 # VEV fair-value controls.
-TV_MODE = "hybrid_70_30"  # fixed, ema, hybrid, hybrid_70_30, hybrid_50_50
+TV_MODE = "ema"  # fixed, ema, hybrid
 TV_HYBRID_SEED_WEIGHT = 0.70
 S_HAT_MODE = "global"  # global, strike_local
 S_WEIGHT_VELVET = 4.0
@@ -313,8 +313,7 @@ SECOND_LEVEL_PRODUCTS: set = set()
 SECOND_LEVEL_SIZE_MULT = 0.5
 SECOND_LEVEL_MAX_ABS_INV_RATIO = 0.70
 
-# Step 15: emergency inventory-reducing taker (ENABLE_INVENTORY_REDUCING_TAKER).
-# Off for static maker-first; leave False alongside ENABLE_TAKER = False.
+# Step 15: conservative inventory-reducing taker. Off by default.
 # When on, only fires to reduce inventory toward 0, requires edge >= 2 * make
 # edge, and never sells a long cheap VEV (cheap-VEV unwinds use the maker).
 ENABLE_INVENTORY_REDUCING_TAKER = False
@@ -403,19 +402,26 @@ def active_product(product: str) -> bool:
     return ACTIVE_PRODUCTS is None or product in ACTIVE_PRODUCTS
 
 
+def submission_side(t: Trade) -> Optional[str]:
+    if str(t.buyer) == "SUBMISSION":
+        return "bid"
+    if str(t.seller) == "SUBMISSION":
+        return "ask"
+    return None
+
+
+def trade_key(product: str, t: Trade, side: str) -> str:
+    return f"{product}:{side}:{int(t.timestamp)}:{int(t.price)}:{int(t.quantity)}"
+
+
 def tv_value(K: int, tv: Dict[str, float]) -> float:
     seed = float(TV_SEED[K])
     ema = float(tv.get(str(K), seed))
     mode = str(TV_MODE).lower()
     if mode == "fixed":
         return seed
-    if mode in {"hybrid", "hybrid_70_30", "hybrid_50_50"}:
-        if mode == "hybrid_70_30":
-            seed_w = 0.70
-        elif mode == "hybrid_50_50":
-            seed_w = 0.50
-        else:
-            seed_w = clamp(float(TV_HYBRID_SEED_WEIGHT), 0.0, 1.0)
+    if mode == "hybrid":
+        seed_w = clamp(float(TV_HYBRID_SEED_WEIGHT), 0.0, 1.0)
         return seed_w * seed + (1.0 - seed_w) * ema
     return ema
 
@@ -458,14 +464,12 @@ def make_edge_mult_for(product: str) -> float:
 
 
 def make_edge_vol_mult_for(product: str) -> float:
-    if ENABLE_PER_PRODUCT_MAKER_VOL_EDGE:
+    if ENABLE_PER_PRODUCT_MAKER_EDGE:
         return float(MAKE_EDGE_VOL_MULT_BY_PRODUCT.get(product, MAKE_EDGE_VOL_MULT))
     return float(MAKE_EDGE_VOL_MULT)
 
 
 def maker_base_size(product: str) -> int:
-    if product in SIZE_BY_PRODUCT:
-        return max(1, int(SIZE_BY_PRODUCT[product]))
     if product == "HYDROGEL_PACK":
         return HYDRO_SIZE
     if product == "VELVETFRUIT_EXTRACT":
@@ -504,6 +508,202 @@ def endgame_active(timestamp: int) -> bool:
     if mode == "normal_until_last_5k":
         return (int(timestamp) % 1_000_000) > 995_000
     return (int(timestamp) % 1_000_000) > ENDGAME_START
+
+
+def ensure_maker_stats(memory: dict) -> dict:
+    stats = memory.get("maker_stats")
+    if not isinstance(stats, dict):
+        stats = {}
+        memory["maker_stats"] = stats
+    for product in LIMITS:
+        p = stats.get(product)
+        if not isinstance(p, dict):
+            p = {}
+            stats[product] = p
+        for side in ("bid", "ask"):
+            s = p.get(side)
+            if not isinstance(s, dict):
+                s = {
+                    "fills": 0,
+                    "qty": 0,
+                    "markout_ema": 0.0,
+                    "markout_var": 1.0,
+                    "win_ema": 0.5,
+                    "last_fill_tick": 0,
+                    "cool_until": 0,
+                }
+                p[side] = s
+    return stats
+
+
+def update_markout_stat(side_state: dict, markout: float, qty: int, tick: int) -> None:
+    fills = int(side_state.get("fills", 0)) + 1
+    old = float(side_state.get("markout_ema", 0.0))
+    delta = markout - old
+    new = old + MARKOUT_ALPHA * delta
+    old_var = float(side_state.get("markout_var", 1.0))
+    new_var = max((1.0 - MARKOUT_ALPHA) * (old_var + MARKOUT_ALPHA * delta * delta), 0.05)
+    win = 1.0 if markout > 0.0 else 0.0
+    old_win = float(side_state.get("win_ema", 0.5))
+
+    side_state["fills"] = fills
+    side_state["qty"] = int(side_state.get("qty", 0)) + int(qty)
+    side_state["markout_ema"] = new
+    side_state["markout_var"] = new_var
+    side_state["win_ema"] = (1.0 - MARKOUT_ALPHA) * old_win + MARKOUT_ALPHA * win
+    side_state["last_fill_tick"] = tick
+    if fills >= ADAPT_STRONG_FILLS and new < ADAPT_TOXIC_MARKOUT:
+        side_state["cool_until"] = tick + ADAPT_COOLDOWN_TICKS
+
+
+def process_fill_markouts(memory: dict, own_trades: Dict[str, List[Trade]], mids: Dict[str, float], tick: int) -> None:
+    if not ENABLE_ADAPTIVE_MARKOUT:
+        return
+    maker_stats = ensure_maker_stats(memory)
+
+    pending = memory.get("pending_fills")
+    if not isinstance(pending, list):
+        pending = []
+    remaining = []
+    for ev in pending:
+        if not isinstance(ev, dict):
+            continue
+        product = str(ev.get("p", ""))
+        side = str(ev.get("s", ""))
+        fill_tick = int(ev.get("t", tick))
+        if tick - fill_tick < MARKOUT_HORIZON or product not in mids:
+            remaining.append(ev)
+            continue
+        price = float(ev.get("px", 0.0))
+        qty = int(ev.get("q", 1))
+        future_mid = float(mids[product])
+        markout = future_mid - price if side == "bid" else price - future_mid
+        side_state = maker_stats.get(product, {}).get(side)
+        if isinstance(side_state, dict):
+            update_markout_stat(side_state, markout, qty, tick)
+
+    seen = memory.get("seen_fills")
+    if not isinstance(seen, list):
+        seen = []
+    seen_set = set(str(x) for x in seen)
+
+    for product, trades in (own_trades or {}).items():
+        for t in trades:
+            if not isinstance(t, Trade):
+                continue
+            side = submission_side(t)
+            if side is None:
+                continue
+            key = trade_key(product, t, side)
+            if key in seen_set:
+                continue
+            seen.append(key)
+            seen_set.add(key)
+            remaining.append({
+                "p": product,
+                "s": side,
+                "px": int(t.price),
+                "q": max(1, abs(int(t.quantity))),
+                "t": tick,
+                "m": float(mids.get(product, t.price)),
+            })
+
+    memory["pending_fills"] = remaining[-MARKOUT_PENDING_MAX:]
+    memory["seen_fills"] = seen[-MARKOUT_SEEN_MAX:]
+
+
+def side_state_name(side_state: dict, tick: int) -> str:
+    if not ENABLE_ADAPTIVE_STATE_MACHINE:
+        return "NORMAL"
+    if int(side_state.get("cool_until", 0)) > tick:
+        return "COOLDOWN"
+    fills = int(side_state.get("fills", 0))
+    if fills < ADAPT_MIN_FILLS:
+        return "NORMAL"
+    markout = float(side_state.get("markout_ema", 0.0))
+    win = float(side_state.get("win_ema", 0.5))
+    if markout > ADAPT_GOOD_MARKOUT and win > ADAPT_GOOD_WIN:
+        return "AGGRESSIVE"
+    if markout < ADAPT_BAD_MARKOUT or win < ADAPT_BAD_WIN:
+        return "DEFENSIVE"
+    return "NORMAL"
+
+
+def adaptive_side_controls(maker_stats: dict, product: str, side: str, position: int, limit: int, tick: int) -> dict:
+    out = {"edge_adj": 0.0, "size_mult": 1.0, "state": "NORMAL", "active": True}
+    if not ENABLE_ADAPTIVE_MARKOUT:
+        return out
+    side_state = maker_stats.get(product, {}).get(side, {})
+    if not isinstance(side_state, dict):
+        return out
+    state = side_state_name(side_state, tick)
+    out["state"] = state
+    fills = int(side_state.get("fills", 0))
+    markout = float(side_state.get("markout_ema", 0.0))
+    win = float(side_state.get("win_ema", 0.5))
+
+    if fills >= ADAPT_MIN_FILLS:
+        if markout > ADAPT_GOOD_MARKOUT and win > ADAPT_GOOD_WIN:
+            out["edge_adj"] -= 0.50
+            out["size_mult"] *= 1.20
+        elif markout < ADAPT_BAD_MARKOUT or win < ADAPT_BAD_WIN:
+            out["edge_adj"] += 0.75
+            out["size_mult"] *= 0.50
+    if state == "COOLDOWN":
+        reduces = (side == "bid" and position < 0) or (side == "ask" and position > 0)
+        out["active"] = reduces
+        out["edge_adj"] += 1.25
+        out["size_mult"] *= 0.25
+    elif state == "AGGRESSIVE":
+        out["edge_adj"] -= 0.25
+        out["size_mult"] *= 1.10
+    elif state == "DEFENSIVE":
+        out["edge_adj"] += 0.50
+        out["size_mult"] *= 0.70
+
+    out["edge_adj"] = clamp(float(out["edge_adj"]), ADAPT_EDGE_MIN, ADAPT_EDGE_MAX)
+    out["size_mult"] = clamp(float(out["size_mult"]), ADAPT_SIZE_MIN, ADAPT_SIZE_MAX)
+    return out
+
+
+def product_confidence(product: str, spread: int, vol: float, last_return: float, rz: float, s_hat: Optional[float]) -> float:
+    if not ENABLE_ADAPTIVE_CONFIDENCE:
+        return 1.0
+    conf = 1.0
+    spread_ref = max(2.0, 3.0 * float(BASE_MAKE_EDGE.get(product, 1.0)))
+    if spread > spread_ref:
+        conf -= min(0.30, 0.04 * (spread - spread_ref))
+    if abs(last_return) > 2.5 * max(vol, 0.5):
+        conf -= 0.25
+    if product.startswith("VEV_"):
+        if s_hat is None:
+            conf -= 0.30
+        if abs(rz) > 2.5:
+            conf -= 0.15
+    return clamp(conf, 0.0, 1.0)
+
+
+def strip_positions(position: Dict[str, int]) -> Dict[str, int]:
+    return {
+        "deep": int(position.get("VEV_4000", 0)) + int(position.get("VEV_4500", 0)),
+        "atm": sum(int(position.get(VEV_BY_STRIKE[K], 0)) for K in [5000, 5100, 5200, 5300]),
+        "cheap": int(position.get("VEV_5400", 0)) + int(position.get("VEV_5500", 0)),
+    }
+
+
+def strip_balance_edge(product: str, side: str, strips: Dict[str, int]) -> float:
+    if not ENABLE_STRIP_BALANCE or not product.startswith("VEV_") or product in WINGS:
+        return 0.0
+    group = product_group(product)
+    group_limit = {"deep": 40.0, "atm": 80.0, "cheap": 40.0}.get(group)
+    if not group_limit:
+        return 0.0
+    ratio = float(strips.get(group, 0)) / group_limit
+    if ratio > STRIP_BALANCE_THRESHOLD and side == "bid":
+        return STRIP_BALANCE_EDGE
+    if ratio < -STRIP_BALANCE_THRESHOLD and side == "ask":
+        return STRIP_BALANCE_EDGE
+    return 0.0
 
 
 # --- Reservation tracker --------------------------------------------------- #
@@ -1013,6 +1213,62 @@ def quote_prices(
     return mb, ma
 
 
+def best_scored_quote(
+    product: str,
+    side: str,
+    bb: int,
+    ba: int,
+    expected: float,
+    skew: float,
+    edge_required: float,
+    score_bonus: float,
+) -> Optional[int]:
+    if side == "bid":
+        candidates = {bb, bb + 1, int(expected + skew - edge_required)}
+        valid: List[Tuple[int, float]] = []
+        for price in candidates:
+            if price <= 0 or price >= ba:
+                continue
+            raw_edge = expected + skew - float(price)
+            score = raw_edge - edge_required + score_bonus
+            if score >= SCORE_THRESHOLD:
+                valid.append((int(price), score))
+        if not valid:
+            return None
+        return max(p for p, _ in valid)
+
+    candidates = {ba, ba - 1, ceil_int(expected + skew + edge_required)}
+    valid = []
+    for price in candidates:
+        if price <= bb:
+            continue
+        raw_edge = float(price) - (expected + skew)
+        score = raw_edge - edge_required + score_bonus
+        if score >= SCORE_THRESHOLD:
+            valid.append((int(price), score))
+    if not valid:
+        return None
+    return min(p for p, _ in valid)
+
+
+def quote_prices_scored(
+    product: str,
+    bb: int,
+    ba: int,
+    expected: float,
+    skew: float,
+    bid_edge: float,
+    ask_edge: float,
+    bid_score_bonus: float,
+    ask_score_bonus: float,
+) -> Tuple[Optional[int], Optional[int]]:
+    mb = best_scored_quote(product, "bid", bb, ba, expected, skew, bid_edge, bid_score_bonus)
+    ma = best_scored_quote(product, "ask", bb, ba, expected, skew, ask_edge, ask_score_bonus)
+    if mb is not None and ma is not None and mb >= ma:
+        mb, ma = None, None
+    return mb, ma
+
+
 # =========================================================================== #
 # Trader                                                                       #
 # =========================================================================== #
@@ -1023,6 +1279,8 @@ class Trader:
         memory = safe_json_loads(state.traderData)
         memory.setdefault("products", {})
         stats = ensure_stats(memory)
+        tick = int(memory.get("tick", 0)) + 1
+        memory["tick"] = tick
 
         update_flow(memory, state.market_trades or {})
         tv = ensure_tv(memory)
@@ -1034,6 +1292,8 @@ class Trader:
             m = mid_price(od)
             if m is not None:
                 mids[product] = m
+        process_fill_markouts(memory, state.own_trades or {}, mids, tick)
+        maker_stats = ensure_maker_stats(memory)
 
         velvet_pstate = memory.get("products", {}).get("VELVETFRUIT_EXTRACT") or {}
         velvet_vol = float(velvet_pstate.get("vol", 1.0))
@@ -1051,6 +1311,7 @@ class Trader:
 
         position_map: Dict[str, int] = state.position or {}
         net_delta = compute_net_delta(position_map) if ENABLE_DELTA_CONTROL else 0.0
+        strip_pos = strip_positions(position_map)
 
         result: Dict[str, List[Order]] = {}
         for product, od in state.order_depths.items():
@@ -1073,6 +1334,9 @@ class Trader:
                     vertical_tilts=vertical_tilts,
                     vertical_sanity=vertical_sanity,
                     net_delta=net_delta,
+                    maker_stats=maker_stats,
+                    strip_pos=strip_pos,
+                    tick=tick,
                     endgame=endgame,
                     stats=stats,
                 )
@@ -1098,6 +1362,9 @@ class Trader:
         vertical_tilts: Dict[str, float],
         vertical_sanity: Dict[str, Dict[str, float]],
         net_delta: float,
+        maker_stats: dict,
+        strip_pos: Dict[str, int],
+        tick: int,
         endgame: bool,
         stats: Dict[str, int],
     ) -> List[Order]:
@@ -1322,6 +1589,23 @@ class Trader:
 
         bid_edge = max(0.0, make_edge + side_edge_adj(product, "bid"))
         ask_edge = max(0.0, make_edge + side_edge_adj(product, "ask"))
+        bid_score_bonus = 0.0
+        ask_score_bonus = 0.0
+
+        # Target inventory is an alpha pressure, not a forced trade. It shifts
+        # maker edge on the side that moves position toward the target.
+        if ENABLE_TARGET_INVENTORY and limit > 0:
+            target_gap = clamp((target_pos - float(position)) / float(limit), -1.0, 1.0)
+            if target_gap > 0.0:
+                adj = TARGET_INV_EDGE_ADJ * abs(target_gap)
+                bid_edge = max(0.0, bid_edge - adj)
+                ask_edge += 0.5 * adj
+                bid_score_bonus += adj
+            elif target_gap < 0.0:
+                adj = TARGET_INV_EDGE_ADJ * abs(target_gap)
+                ask_edge = max(0.0, ask_edge - adj)
+                bid_edge += 0.5 * adj
+                ask_score_bonus += adj
 
         # Step 6: residual side gate (VEV non-wing).
         gate_disable_bid = False
@@ -1338,10 +1622,45 @@ class Trader:
             bid_edge = max(0.0, bid_edge + float(v_adj.get("bid", 0.0)))
             ask_edge = max(0.0, ask_edge + float(v_adj.get("ask", 0.0)))
 
+        bid_edge += strip_balance_edge(product, "bid", strip_pos)
+        ask_edge += strip_balance_edge(product, "ask", strip_pos)
+
+        bid_adapt = adaptive_side_controls(maker_stats, product, "bid", position, limit, tick)
+        ask_adapt = adaptive_side_controls(maker_stats, product, "ask", position, limit, tick)
+        bid_edge = max(0.0, bid_edge + float(bid_adapt["edge_adj"]))
+        ask_edge = max(0.0, ask_edge + float(ask_adapt["edge_adj"]))
+        if bid_adapt["state"] == "AGGRESSIVE":
+            bid_score_bonus += 0.35
+        elif bid_adapt["state"] == "DEFENSIVE":
+            bid_score_bonus -= 0.25
+        if ask_adapt["state"] == "AGGRESSIVE":
+            ask_score_bonus += 0.35
+        elif ask_adapt["state"] == "DEFENSIVE":
+            ask_score_bonus -= 0.25
+
+        confidence = product_confidence(product, spread, vol, last_return, rz, s_hat)
+        conf_size_mult = 1.0
+        if confidence > 0.75:
+            bid_edge = max(0.0, bid_edge - 0.10)
+            ask_edge = max(0.0, ask_edge - 0.10)
+            bid_score_bonus += 0.10
+            ask_score_bonus += 0.10
+        elif confidence < CONF_LOW:
+            penalty = CONF_EDGE_PENALTY * (CONF_LOW - confidence) / CONF_LOW
+            bid_edge += penalty
+            ask_edge += penalty
+            conf_size_mult = max(CONF_SIZE_MIN, confidence / CONF_LOW)
+
         max_bid = expected + skew - bid_edge   # highest price we'd bid
         min_ask = expected + skew + ask_edge   # lowest price we'd ask
 
-        mb, ma = quote_prices(product, bb, ba, max_bid, min_ask, spread)
+        if ENABLE_QUOTE_SCORING:
+            mb, ma = quote_prices_scored(
+                product, bb, ba, expected, skew, bid_edge, ask_edge,
+                bid_score_bonus, ask_score_bonus,
+            )
+        else:
+            mb, ma = quote_prices(product, bb, ba, max_bid, min_ask, spread)
 
         # Inventory-aware maker size.
         base_ms = maker_base_size(product)
@@ -1352,6 +1671,8 @@ class Trader:
             ms_sell = base_ms + 1
         if position < 0:
             ms_buy = base_ms + 1
+        ms_buy = max(1, int(round(ms_buy * float(bid_adapt["size_mult"]) * conf_size_mult)))
+        ms_sell = max(1, int(round(ms_sell * float(ask_adapt["size_mult"]) * conf_size_mult)))
         # Smaller when near limit.
         room_b = book.buy_room()
         room_s = book.sell_room()
@@ -1380,8 +1701,20 @@ class Trader:
             cheap_short_edge = cheap_fair + max(CHEAP_SHORT_EDGE, CHEAP_SHORT_THRESHOLD_MULT * make_edge)
             cheap_blocks_maker_short = ma is None or ma < cheap_short_edge
 
-        bid_active = is_side_active(product, "bid") and not gate_disable_bid
-        ask_active = is_side_active(product, "ask") and not gate_disable_ask
+        bid_reduces_inventory = position < 0
+        ask_reduces_inventory = position > 0
+        bid_active = (
+            is_side_active(product, "bid")
+            and bool(bid_adapt["active"])
+            and not gate_disable_bid
+            and not (confidence < CONF_SKIP and not bid_reduces_inventory)
+        )
+        ask_active = (
+            is_side_active(product, "ask")
+            and bool(ask_adapt["active"])
+            and not gate_disable_ask
+            and not (confidence < CONF_SKIP and not ask_reduces_inventory)
+        )
 
         if (
             mb is not None and ms_buy > 0

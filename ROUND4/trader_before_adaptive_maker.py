@@ -1,13 +1,14 @@
-"""Prosperity 4 Round 4 trader (v3 — static maker-first hybrid).
+"""Prosperity 4 Round 4 trader (v3 - maker-first hybrid).
 
-Proven pre-adaptive baseline lives in ``trader_before_adaptive_maker.py`` (and
-``trader_failed_adaptive.py`` holds the discarded quote-scoring / target-inventory
-variant). This file keeps that architecture: reservation Book, VEV ladder,
-maker-only alpha, no online markout or adaptive state machine.
-
-Static calibration (product maker edges, sizes, hybrid TV, mild vertical sanity)
-is the only layer on top of the baseline — no quote scoring, strip balance, or
-full takers.
+Measured direction:
+- Per-tick reservation accounting (Book) is the single source of capacity.
+- HYDROGEL remains the main independent market-making book.
+- VELVET plus deep ITM VEV anchors feed the VEV fair-value ladder.
+- Maker quotes drive PnL; aggressive taker logic is disabled by default.
+- Delta hard gates, VELVET hedge pressure, and adverse-selection skips are disabled.
+- Residual VEV tilt, MR, dynamic maker edges, TV updates, and inventory skew stay active.
+- Lightweight diagnostics counters in traderData.
+- Feature flags for clean ablation.
 
 Runtime depends only on the prosperity datamodel.
 """
@@ -37,14 +38,6 @@ ENABLE_VELVET_HEDGE_PRESSURE = False
 ENABLE_TAKER = False
 ENABLE_MAKER = True
 ENABLE_MONOTONIC_VEV_FAIR = True
-
-# Explicitly keep the failed adaptive-maker machinery disabled. These switches
-# are intentionally inert in this static bot if no corresponding code exists.
-ENABLE_QUOTE_SCORING = False
-ENABLE_ADAPTIVE_MARKOUT = False
-ENABLE_ADAPTIVE_CONFIDENCE = False
-ENABLE_ADAPTIVE_STATE_MACHINE = False
-ENABLE_STRIP_BALANCE = False
 
 # Test switches; None means trade every listed product.
 ACTIVE_PRODUCTS = None
@@ -167,8 +160,6 @@ QUOTE_STYLE_BY_PRODUCT = {
     "VEV_5300": "hybrid",
     "VEV_5400": "hybrid",
     "VEV_5500": "hybrid",
-    "VEV_6000": "hybrid",
-    "VEV_6500": "hybrid",
 }
 SIDE_EDGE_ADJ = {
     "HYDROGEL_PACK": {"bid": 0.0, "ask": 0.0},
@@ -181,8 +172,6 @@ SIDE_EDGE_ADJ = {
     "VEV_5300": {"bid": 0.0, "ask": 0.0},
     "VEV_5400": {"bid": 0.0, "ask": 0.0},
     "VEV_5500": {"bid": 0.0, "ask": 0.0},
-    "VEV_6000": {"bid": 0.0, "ask": 0.0},
-    "VEV_6500": {"bid": 0.0, "ask": 0.0},
 }
 
 # Step 5: per-product, per-side activation. Default all True so disabling a side
@@ -199,8 +188,6 @@ ACTIVE_SIDES: Dict[str, Dict[str, bool]] = {
     "VEV_5300":           {"bid": True, "ask": True},
     "VEV_5400":           {"bid": True, "ask": True},
     "VEV_5500":           {"bid": True, "ask": True},
-    "VEV_6000":           {"bid": True, "ask": True},
-    "VEV_6500":           {"bid": True, "ask": True},
 }
 
 # Step 6: residual side gate. Replaces vertical tilt's coarse fair shift with a
@@ -210,34 +197,31 @@ ACTIVE_SIDES: Dict[str, Dict[str, bool]] = {
 #   |rz| > hard_threshold            -> disable opposite side outright
 RESID_SIDE_GATE = True
 RESID_SIDE_THRESHOLD = 0.75
-RESID_OPPOSITE_EDGE_ADD = 0.5
-RESID_HARD_THRESHOLD = 2.0
+RESID_OPPOSITE_EDGE_ADD = 1.0
+RESID_HARD_THRESHOLD = 1.5
 
 # Step 7: vertical no-arbitrage sanity. Lightweight per-side edge nudge for
 # adjacent strike pairs based on (mid_K1 - mid_K2) - (fair_K1 - fair_K2).
 ENABLE_VERTICAL_SANITY = True
-VERTICAL_EDGE_ADJ = 0.50
+VERTICAL_EDGE_ADJ = 0.5
 VERTICAL_SIGNAL_THRESHOLD = 1.5
 VERTICAL_SANITY_SPREAD_CAP = 6  # skip pair if either spread > this
 
 # Steps 8-9: per-product maker edge multipliers. Default flag off so the global
 # MAKE_EDGE_MULT / MAKE_EDGE_VOL_MULT continue to govern edges (preserves the
 # 1600 baseline). Flip ENABLE_PER_PRODUCT_MAKER_EDGE to switch to the dicts.
-ENABLE_PER_PRODUCT_MAKER_EDGE = True
-ENABLE_PER_PRODUCT_MAKER_VOL_EDGE = False
+ENABLE_PER_PRODUCT_MAKER_EDGE = False
 MAKE_EDGE_MULT_BY_PRODUCT: Dict[str, float] = {
-    "HYDROGEL_PACK": 0.60,
+    "HYDROGEL_PACK": 0.65,
     "VELVETFRUIT_EXTRACT": 0.75,
-    "VEV_4000": 0.60,
-    "VEV_4500": 0.60,
+    "VEV_4000": 0.65,
+    "VEV_4500": 0.65,
     "VEV_5000": 0.75,
-    "VEV_5100": 0.80,
+    "VEV_5100": 0.75,
     "VEV_5200": 0.85,
     "VEV_5300": 0.85,
     "VEV_5400": 1.00,
-    "VEV_5500": 1.10,
-    "VEV_6000": 999.0,
-    "VEV_6500": 999.0,
+    "VEV_5500": 1.00,
 }
 MAKE_EDGE_VOL_MULT_BY_PRODUCT: Dict[str, float] = {
     "HYDROGEL_PACK": 0.05,
@@ -250,8 +234,6 @@ MAKE_EDGE_VOL_MULT_BY_PRODUCT: Dict[str, float] = {
     "VEV_5300": 0.10,
     "VEV_5400": 0.12,
     "VEV_5500": 0.12,
-    "VEV_6000": 0.08,
-    "VEV_6500": 0.08,
 }
 
 # Step 13: target-inventory skew. When on, the maker skew center moves from 0
@@ -261,8 +243,7 @@ ENABLE_TARGET_INVENTORY = False
 TARGET_INV_STRENGTH = 0.5
 TARGET_INV_VEV_STRENGTH = 0.5  # extra dampener for VEVs (small target on ATM/cheap)
 
-# Maker sizes by product. Static table beats online size mutation here; normal
-# reservation and limit clamping still apply every tick.
+# Maker sizes by product group.
 HYDRO_SIZE = 5
 VELVET_SIZE = 4
 DEEP_VEV_SIZE = 2
@@ -270,24 +251,10 @@ ATM_VEV_SIZE = 2
 CHEAP_VEV_SIZE = 1
 WING_BID_SIZE = 2
 WING_UNWIND_SIZE = 4
-SIZE_BY_PRODUCT: Dict[str, int] = {
-    "HYDROGEL_PACK": 5,
-    "VELVETFRUIT_EXTRACT": 4,
-    "VEV_4000": 2,
-    "VEV_4500": 2,
-    "VEV_5000": 2,
-    "VEV_5100": 2,
-    "VEV_5200": 1,
-    "VEV_5300": 1,
-    "VEV_5400": 1,
-    "VEV_5500": 1,
-    "VEV_6000": 1,
-    "VEV_6500": 1,
-}
 ENABLE_INVENTORY_BUCKET_SIZING = False
 
 # VEV fair-value controls.
-TV_MODE = "hybrid_70_30"  # fixed, ema, hybrid, hybrid_70_30, hybrid_50_50
+TV_MODE = "ema"  # fixed, ema, hybrid
 TV_HYBRID_SEED_WEIGHT = 0.70
 S_HAT_MODE = "global"  # global, strike_local
 S_WEIGHT_VELVET = 4.0
@@ -313,8 +280,7 @@ SECOND_LEVEL_PRODUCTS: set = set()
 SECOND_LEVEL_SIZE_MULT = 0.5
 SECOND_LEVEL_MAX_ABS_INV_RATIO = 0.70
 
-# Step 15: emergency inventory-reducing taker (ENABLE_INVENTORY_REDUCING_TAKER).
-# Off for static maker-first; leave False alongside ENABLE_TAKER = False.
+# Step 15: conservative inventory-reducing taker. Off by default.
 # When on, only fires to reduce inventory toward 0, requires edge >= 2 * make
 # edge, and never sells a long cheap VEV (cheap-VEV unwinds use the maker).
 ENABLE_INVENTORY_REDUCING_TAKER = False
@@ -409,13 +375,8 @@ def tv_value(K: int, tv: Dict[str, float]) -> float:
     mode = str(TV_MODE).lower()
     if mode == "fixed":
         return seed
-    if mode in {"hybrid", "hybrid_70_30", "hybrid_50_50"}:
-        if mode == "hybrid_70_30":
-            seed_w = 0.70
-        elif mode == "hybrid_50_50":
-            seed_w = 0.50
-        else:
-            seed_w = clamp(float(TV_HYBRID_SEED_WEIGHT), 0.0, 1.0)
+    if mode == "hybrid":
+        seed_w = clamp(float(TV_HYBRID_SEED_WEIGHT), 0.0, 1.0)
         return seed_w * seed + (1.0 - seed_w) * ema
     return ema
 
@@ -458,14 +419,12 @@ def make_edge_mult_for(product: str) -> float:
 
 
 def make_edge_vol_mult_for(product: str) -> float:
-    if ENABLE_PER_PRODUCT_MAKER_VOL_EDGE:
+    if ENABLE_PER_PRODUCT_MAKER_EDGE:
         return float(MAKE_EDGE_VOL_MULT_BY_PRODUCT.get(product, MAKE_EDGE_VOL_MULT))
     return float(MAKE_EDGE_VOL_MULT)
 
 
 def maker_base_size(product: str) -> int:
-    if product in SIZE_BY_PRODUCT:
-        return max(1, int(SIZE_BY_PRODUCT[product]))
     if product == "HYDROGEL_PACK":
         return HYDRO_SIZE
     if product == "VELVETFRUIT_EXTRACT":

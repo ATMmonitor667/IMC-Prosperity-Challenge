@@ -1,13 +1,14 @@
-"""Prosperity 4 Round 4 trader (v3 — static maker-first hybrid).
+"""Prosperity 4 Round 4 trader (v3 - maker-first hybrid).
 
-Proven pre-adaptive baseline lives in ``trader_before_adaptive_maker.py`` (and
-``trader_failed_adaptive.py`` holds the discarded quote-scoring / target-inventory
-variant). This file keeps that architecture: reservation Book, VEV ladder,
-maker-only alpha, no online markout or adaptive state machine.
-
-Static calibration (product maker edges, sizes, hybrid TV, mild vertical sanity)
-is the only layer on top of the baseline — no quote scoring, strip balance, or
-full takers.
+Measured direction:
+- Per-tick reservation accounting (Book) is the single source of capacity.
+- HYDROGEL remains the main independent market-making book.
+- VELVET plus deep ITM VEV anchors feed the VEV fair-value ladder.
+- Maker quotes drive PnL; aggressive taker logic is disabled by default.
+- Delta hard gates, VELVET hedge pressure, and adverse-selection skips are disabled.
+- Residual VEV tilt, MR, dynamic maker edges, TV updates, and inventory skew stay active.
+- Lightweight diagnostics counters in traderData.
+- Feature flags for clean ablation.
 
 Runtime depends only on the prosperity datamodel.
 """
@@ -167,8 +168,6 @@ QUOTE_STYLE_BY_PRODUCT = {
     "VEV_5300": "hybrid",
     "VEV_5400": "hybrid",
     "VEV_5500": "hybrid",
-    "VEV_6000": "hybrid",
-    "VEV_6500": "hybrid",
 }
 SIDE_EDGE_ADJ = {
     "HYDROGEL_PACK": {"bid": 0.0, "ask": 0.0},
@@ -181,8 +180,6 @@ SIDE_EDGE_ADJ = {
     "VEV_5300": {"bid": 0.0, "ask": 0.0},
     "VEV_5400": {"bid": 0.0, "ask": 0.0},
     "VEV_5500": {"bid": 0.0, "ask": 0.0},
-    "VEV_6000": {"bid": 0.0, "ask": 0.0},
-    "VEV_6500": {"bid": 0.0, "ask": 0.0},
 }
 
 # Step 5: per-product, per-side activation. Default all True so disabling a side
@@ -199,8 +196,6 @@ ACTIVE_SIDES: Dict[str, Dict[str, bool]] = {
     "VEV_5300":           {"bid": True, "ask": True},
     "VEV_5400":           {"bid": True, "ask": True},
     "VEV_5500":           {"bid": True, "ask": True},
-    "VEV_6000":           {"bid": True, "ask": True},
-    "VEV_6500":           {"bid": True, "ask": True},
 }
 
 # Step 6: residual side gate. Replaces vertical tilt's coarse fair shift with a
@@ -313,8 +308,7 @@ SECOND_LEVEL_PRODUCTS: set = set()
 SECOND_LEVEL_SIZE_MULT = 0.5
 SECOND_LEVEL_MAX_ABS_INV_RATIO = 0.70
 
-# Step 15: emergency inventory-reducing taker (ENABLE_INVENTORY_REDUCING_TAKER).
-# Off for static maker-first; leave False alongside ENABLE_TAKER = False.
+# Step 15: conservative inventory-reducing taker. Off by default.
 # When on, only fires to reduce inventory toward 0, requires edge >= 2 * make
 # edge, and never sells a long cheap VEV (cheap-VEV unwinds use the maker).
 ENABLE_INVENTORY_REDUCING_TAKER = False
