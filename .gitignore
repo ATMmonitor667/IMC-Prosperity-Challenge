@@ -1,6 +1,58 @@
-dashboard/web/node_modules/
-ROUND1/backtests/
+# --- Python ---
 **/__pycache__/
 *.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+.eggs/
+*.egg-info/
+.venv/
+venv/
+.env
+.env.local
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Node (dashboard) ---
+dashboard/web/node_modules/
+
+# --- Large / local market data (do not commit multi‑MB day files) ---
+**/prices_round_*.csv
+**/trades_round_*.csv
+# Duplicate data folder under ROUND4 (copy used only for `prosperity4bt` path layout)
+ROUND4/round4/
+bt_data/
+
+# --- Backtester / run outputs ---
+**/backtests/
+*.log
+logs/
+ROUND3/tests/prosperity_rust_backtester
 imcprosp4/
 imcprosp4
+ROUND1/backtests/
+
+# --- Local experiments & scratch (Round 3 style) ---
+__tmp_*.py
+*_tmp.py
+**/__tmp_*.pyc
+tmp*.py
+
+# --- Binary / data dumps (if present) ---
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.parquet
+*.feather
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp
+*~

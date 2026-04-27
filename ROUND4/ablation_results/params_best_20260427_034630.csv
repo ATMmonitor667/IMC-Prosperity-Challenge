@@ -1,0 +1,7 @@
+variant,total_pnl,trade_count,max_drawdown,final_positions,product_pnl_by_day,log_path,returncode,elapsed_sec,notes
+PB_make_edge_mult_0.5,0,,,{},{},,1,0.574,
+PB_make_edge_mult_0.65,0,,,{},{},,1,0.564,
+PB_make_edge_mult_0.75,0,,,{},{},,1,0.548,
+PB_make_edge_mult_0.9,0,,,{},{},,1,0.536,
+PB_make_edge_mult_1.0,0,,,{},{},,1,0.571,
+PB_make_edge_mult_1.15,0,,,{},{},,1,0.56,

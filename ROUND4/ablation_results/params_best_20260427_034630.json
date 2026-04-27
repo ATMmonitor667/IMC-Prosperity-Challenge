@@ -1,0 +1,128 @@
+[
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PB_make_edge_mult_0.5.py 4-1 4-2 4-3",
+    "day_totals": {},
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 0.574,
+    "final_positions": {},
+    "log_path": null,
+    "max_drawdown": null,
+    "notes": "",
+    "product_pnl_by_day": {},
+    "returncode": 1,
+    "stdout_tail": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PB_make_edge_mult_0.5.py is not a valid algorithm file: No module named 'PB_make_edge_mult_0'",
+    "total_pnl": 0,
+    "trade_count": null,
+    "traderdata_max_size": null,
+    "variant": "PB_make_edge_mult_0.5"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PB_make_edge_mult_0.65.py 4-1 4-2 4-3",
+    "day_totals": {},
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 0.564,
+    "final_positions": {},
+    "log_path": null,
+    "max_drawdown": null,
+    "notes": "",
+    "product_pnl_by_day": {},
+    "returncode": 1,
+    "stdout_tail": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PB_make_edge_mult_0.65.py is not a valid algorithm file: No module named 'PB_make_edge_mult_0'",
+    "total_pnl": 0,
+    "trade_count": null,
+    "traderdata_max_size": null,
+    "variant": "PB_make_edge_mult_0.65"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PB_make_edge_mult_0.75.py 4-1 4-2 4-3",
+    "day_totals": {},
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 0.548,
+    "final_positions": {},
+    "log_path": null,
+    "max_drawdown": null,
+    "notes": "",
+    "product_pnl_by_day": {},
+    "returncode": 1,
+    "stdout_tail": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PB_make_edge_mult_0.75.py is not a valid algorithm file: No module named 'PB_make_edge_mult_0'",
+    "total_pnl": 0,
+    "trade_count": null,
+    "traderdata_max_size": null,
+    "variant": "PB_make_edge_mult_0.75"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PB_make_edge_mult_0.9.py 4-1 4-2 4-3",
+    "day_totals": {},
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 0.536,
+    "final_positions": {},
+    "log_path": null,
+    "max_drawdown": null,
+    "notes": "",
+    "product_pnl_by_day": {},
+    "returncode": 1,
+    "stdout_tail": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PB_make_edge_mult_0.9.py is not a valid algorithm file: No module named 'PB_make_edge_mult_0'",
+    "total_pnl": 0,
+    "trade_count": null,
+    "traderdata_max_size": null,
+    "variant": "PB_make_edge_mult_0.9"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PB_make_edge_mult_1.0.py 4-1 4-2 4-3",
+    "day_totals": {},
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 0.571,
+    "final_positions": {},
+    "log_path": null,
+    "max_drawdown": null,
+    "notes": "",
+    "product_pnl_by_day": {},
+    "returncode": 1,
+    "stdout_tail": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PB_make_edge_mult_1.0.py is not a valid algorithm file: No module named 'PB_make_edge_mult_1'",
+    "total_pnl": 0,
+    "trade_count": null,
+    "traderdata_max_size": null,
+    "variant": "PB_make_edge_mult_1.0"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PB_make_edge_mult_1.15.py 4-1 4-2 4-3",
+    "day_totals": {},
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 0.56,
+    "final_positions": {},
+    "log_path": null,
+    "max_drawdown": null,
+    "notes": "",
+    "product_pnl_by_day": {},
+    "returncode": 1,
+    "stdout_tail": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PB_make_edge_mult_1.15.py is not a valid algorithm file: No module named 'PB_make_edge_mult_1'",
+    "total_pnl": 0,
+    "trade_count": null,
+    "traderdata_max_size": null,
+    "variant": "PB_make_edge_mult_1.15"
+  }
+]

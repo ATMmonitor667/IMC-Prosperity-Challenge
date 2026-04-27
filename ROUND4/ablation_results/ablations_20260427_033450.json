@@ -1,0 +1,81 @@
+[
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\01_current_all_features.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 13494.0,
+      "4-2": 7520.0,
+      "4-3": 32936.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 16.955,
+    "final_positions": {
+      "HYDROGEL_PACK": 3,
+      "VELVETFRUIT_EXTRACT": -1,
+      "VEV_4000": 3,
+      "VEV_5000": 1,
+      "VEV_5100": 0,
+      "VEV_5200": -14,
+      "VEV_5300": 5,
+      "VEV_5400": 6,
+      "VEV_5500": 7,
+      "VEV_6000": 60,
+      "VEV_6500": 60
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-27_03-34-34.log",
+    "max_drawdown": 1373.5,
+    "notes": "current trader.py",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 10873.0,
+        "VELVETFRUIT_EXTRACT": 1666.0,
+        "VEV_4000": 1886.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": -18.0,
+        "VEV_5200": -1701.0,
+        "VEV_5300": 512.0,
+        "VEV_5400": 254.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4667.0,
+        "VELVETFRUIT_EXTRACT": 2080.0,
+        "VEV_4000": 1525.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": -754.0,
+        "VEV_5300": 65.0,
+        "VEV_5400": -88.0,
+        "VEV_5500": 5.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 9766.0,
+        "VELVETFRUIT_EXTRACT": 1903.0,
+        "VEV_4000": 1640.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 28.0,
+        "VEV_5100": 24.0,
+        "VEV_5200": -1600.0,
+        "VEV_5300": 163.0,
+        "VEV_5400": -22.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 53950.0,
+    "trade_count": 4802,
+    "traderdata_max_size": null,
+    "variant": "01_current_all_features"
+  }
+]
