@@ -186,14 +186,15 @@ SIDE_EDGE_ADJ = {
 }
 
 # Step 5: per-product, per-side activation. Default all True so disabling a side
-# is opt-in. Keep side disables conservative and backed by multi-day backtests.
+# is opt-in. Disable a side only after fill diagnostics show it loses money on
+# at least two days.
 ACTIVE_SIDES: Dict[str, Dict[str, bool]] = {
     "HYDROGEL_PACK":      {"bid": True, "ask": True},
     "VELVETFRUIT_EXTRACT":{"bid": True, "ask": True},
     "VEV_4000":           {"bid": True, "ask": True},
     "VEV_4500":           {"bid": True, "ask": True},
-    "VEV_5000":           {"bid": True, "ask": False},
-    "VEV_5100":           {"bid": True, "ask": False},
+    "VEV_5000":           {"bid": True, "ask": True},
+    "VEV_5100":           {"bid": True, "ask": True},
     "VEV_5200":           {"bid": True, "ask": True},
     "VEV_5300":           {"bid": True, "ask": True},
     "VEV_5400":           {"bid": True, "ask": True},
@@ -209,14 +210,14 @@ ACTIVE_SIDES: Dict[str, Dict[str, bool]] = {
 #   |rz| > hard_threshold            -> disable opposite side outright
 RESID_SIDE_GATE = True
 RESID_SIDE_THRESHOLD = 0.75
-RESID_OPPOSITE_EDGE_ADD = 1.0
-RESID_HARD_THRESHOLD = 999.0
+RESID_OPPOSITE_EDGE_ADD = 0.5
+RESID_HARD_THRESHOLD = 2.0
 
 # Step 7: vertical no-arbitrage sanity. Lightweight per-side edge nudge for
 # adjacent strike pairs based on (mid_K1 - mid_K2) - (fair_K1 - fair_K2).
 ENABLE_VERTICAL_SANITY = True
 VERTICAL_EDGE_ADJ = 0.50
-VERTICAL_SIGNAL_THRESHOLD = 2.0
+VERTICAL_SIGNAL_THRESHOLD = 1.5
 VERTICAL_SANITY_SPREAD_CAP = 6  # skip pair if either spread > this
 
 # Steps 8-9: per-product maker edge multipliers. Default flag off so the global
@@ -270,14 +271,14 @@ CHEAP_VEV_SIZE = 1
 WING_BID_SIZE = 2
 WING_UNWIND_SIZE = 4
 SIZE_BY_PRODUCT: Dict[str, int] = {
-    "HYDROGEL_PACK": 6,
+    "HYDROGEL_PACK": 5,
     "VELVETFRUIT_EXTRACT": 4,
-    "VEV_4000": 3,
+    "VEV_4000": 2,
     "VEV_4500": 2,
     "VEV_5000": 2,
     "VEV_5100": 2,
-    "VEV_5200": 2,
-    "VEV_5300": 2,
+    "VEV_5200": 1,
+    "VEV_5300": 1,
     "VEV_5400": 1,
     "VEV_5500": 1,
     "VEV_6000": 1,
