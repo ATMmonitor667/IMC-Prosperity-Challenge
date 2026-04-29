@@ -16,9 +16,10 @@ class Trader:
     - Keeps the original family-relative value and microprice engine.
     - Fixes the true Round 5 hard limit: 10 per product.
     - Clips every order before it is sent, so the exchange should not reject whole product legs.
-    - Starts from the best uploaded run architecture and keeps its product priors.
-    - Adds deterministic product time-stops for products that repeatedly gave back large mid-run peaks.
-    - Adds a light top-of-book toxicity guard from the later robust variants.
+    - Starts from the best uploaded run architecture, but removes exact timestamp exits.
+    - Uses state-based risk reduction from signal conflict, live markouts, inventory age, and volatility.
+    - Adds side-specific adverse-selection tracking for passive bid/ask fills.
+    - Adds family-regime scaling and capped anonymous tape-flow.
     - Uses warm-up before trusting relative value so permanent level differences are not
       mistaken for mispricing.
     - Adds online alpha markout scoring. If a product starts losing live, its size decays.
@@ -38,7 +39,10 @@ class Trader:
 
     MAX_PENDING_ALPHA = 1200
     MAX_PENDING_CP = 1600
+    MAX_PENDING_SIDE = 1600
     MAX_SEEN_TRADES = 5000
+    MAX_SEEN_OWN_TRADES = 2500
+    INVENTORY_AGE_LIMIT = 5000
 
     FAMILY_PREFIXES = (
         "GALAXY_SOUNDS",
@@ -53,8 +57,7 @@ class Trader:
         "UV_VISOR",
     )
 
-    # These were persistent large losers under the profitable v1-style engine.
-    # They are flattened if accidentally held and otherwise not traded.
+    # These names start with a low prior, but can earn some size back via live markouts.
     AVOID = {
         "TRANSLATOR_SPACE_GRAY",
         "GALAXY_SOUNDS_DARK_MATTER",
@@ -74,6 +77,22 @@ class Trader:
         "PEBBLES_M",
         "PEBBLES_S",
         "OXYGEN_SHAKE_EVENING_BREATH",
+        "SLEEP_POD_COTTON",
+        "SNACKPACK_RASPBERRY",
+        "ROBOT_IRONING",
+    }
+
+    # Keep hard pruning only for repeated severe losers.
+    HARD_AVOID = {
+        "TRANSLATOR_SPACE_GRAY",
+        "GALAXY_SOUNDS_DARK_MATTER",
+        "GALAXY_SOUNDS_PLANETARY_RINGS",
+        "OXYGEN_SHAKE_MORNING_BREATH",
+        "ROBOT_DISHES",
+        "PANEL_2X2",
+        "PANEL_1X2",
+        "OXYGEN_SHAKE_MINT",
+        "SLEEP_POD_LAMB_WOOL",
         "SLEEP_POD_COTTON",
         "SNACKPACK_RASPBERRY",
         "ROBOT_IRONING",
@@ -150,31 +169,6 @@ class Trader:
         "PANEL_4X4",
     }
 
-    # Deterministic time-stop risk overlay from v10 trajectory analysis.
-    # These products produced large mid-run peaks and then gave back substantial PnL.
-    # A static stop avoids the v11 mistake of tracking own-trade PnL inside traderData.
-    TIME_STOPS = {
-        "TRANSLATOR_GRAPHITE_MIST": 21000,
-        "SNACKPACK_PISTACHIO": 62000,
-        "SNACKPACK_STRAWBERRY": 61000,
-        "SLEEP_POD_POLYESTER": 61000,
-        "SNACKPACK_VANILLA": 61000,
-        "OXYGEN_SHAKE_CHOCOLATE": 97000,
-        "UV_VISOR_MAGENTA": 63000,
-        "ROBOT_VACUUMING": 71000,
-        "GALAXY_SOUNDS_SOLAR_FLAMES": 77000,
-        "ROBOT_MOPPING": 90000,
-        "SLEEP_POD_NYLON": 61000,
-        "SLEEP_POD_SUEDE": 96000,
-        "GALAXY_SOUNDS_SOLAR_WINDS": 97000,
-        "TRANSLATOR_ASTRO_BLACK": 97200,
-        "PEBBLES_L": 96500,
-        "UV_VISOR_AMBER": 37000,
-        "PEBBLES_XL": 94000,
-        "PANEL_4X4": 97000,
-        "MICROCHIP_SQUARE": 99200,
-    }
-
     def _default_memory(self) -> Dict[str, Any]:
         return {
             "fair_hist": {},
@@ -185,6 +179,12 @@ class Trader:
             "cp_score": {},
             "pending_cp": [],
             "seen_trades": [],
+            "side_perf": {},
+            "pending_side": [],
+            "seen_own_trades": [],
+            "position_state": {},
+            "last_quotes": {},
+            "tape_flow": {},
         }
 
     def _load_memory(self, data: str) -> Dict[str, Any]:
@@ -211,7 +211,9 @@ class Trader:
 
         mem["pending_alpha"] = mem.get("pending_alpha", [])[-self.MAX_PENDING_ALPHA:]
         mem["pending_cp"] = mem.get("pending_cp", [])[-self.MAX_PENDING_CP:]
+        mem["pending_side"] = mem.get("pending_side", [])[-self.MAX_PENDING_SIDE:]
         mem["seen_trades"] = mem.get("seen_trades", [])[-self.MAX_SEEN_TRADES:]
+        mem["seen_own_trades"] = mem.get("seen_own_trades", [])[-self.MAX_SEEN_OWN_TRADES:]
 
         if len(mem.get("cp_score", {})) > 1200:
             items = sorted(
@@ -220,6 +222,17 @@ class Trader:
                 reverse=True,
             )
             mem["cp_score"] = dict(items[:800])
+
+        if len(mem.get("side_perf", {})) > 200:
+            items = sorted(
+                mem["side_perf"].items(),
+                key=lambda kv: max(
+                    abs(float(kv[1].get("bid", {}).get("s", 0.0))),
+                    abs(float(kv[1].get("ask", {}).get("s", 0.0))),
+                ),
+                reverse=True,
+            )
+            mem["side_perf"] = dict(items[:150])
 
         return jsonpickle.encode(mem)
 
@@ -319,6 +332,40 @@ class Trader:
                 groups[self._family(product)].append(math.log(fair))
         return {fam: self._mean(vals) for fam, vals in groups.items() if vals}
 
+    def _family_regimes(self, mem: Dict[str, Any], fairs: Dict[str, float]) -> Dict[str, Dict[str, float]]:
+        groups: Dict[str, List[Tuple[str, float]]] = defaultdict(list)
+        for product, fair in fairs.items():
+            groups[self._family(product)].append((product, fair))
+
+        regimes: Dict[str, Dict[str, float]] = {}
+        for fam, items in groups.items():
+            pressures = []
+            directions = []
+            for product, fair in items:
+                hist = mem.get("fair_hist", {}).get(product, [])
+                if not hist:
+                    continue
+                ret = fair - float(hist[-1])
+                rh = mem.get("ret_hist", {}).get(product, [])
+                vol = max(1.0, self._std(rh[-self.RET_HISTORY:]) if len(rh) >= 3 else abs(ret))
+                pressures.append(abs(ret) / vol)
+                if abs(ret) > 0.20 * vol:
+                    directions.append(1.0 if ret > 0 else -1.0)
+
+            if not pressures:
+                regimes[fam] = {"rel": 1.0, "trend": 1.0, "micro": 1.0}
+                continue
+
+            pressure = self._mean(pressures)
+            coherence = abs(sum(directions)) / len(directions) if directions else 0.0
+            stress = self._clip(pressure * coherence, 0.0, 3.0)
+            regimes[fam] = {
+                "rel": self._clip(1.0 / (1.0 + 0.42 * stress), 0.45, 1.0),
+                "trend": self._clip(1.0 + 0.22 * stress, 1.0, 1.40),
+                "micro": self._clip(1.0 + 0.12 * stress, 1.0, 1.25),
+            }
+        return regimes
+
     def _resolve_alpha_markouts(self, mem: Dict[str, Any], timestamp: int, fairs: Dict[str, float]) -> None:
         pending = []
         for ev in mem.get("pending_alpha", []):
@@ -339,16 +386,19 @@ class Trader:
             n = int(rec.get("n", 0))
             lr = 0.10 if n < 8 else 0.045
             rec["s"] = (1.0 - lr) * float(rec.get("s", 0.0)) + lr * markout
+            rec["peak"] = max(float(rec.get("peak", rec["s"])), float(rec["s"]))
             rec["n"] = min(9999, n + 1)
             mem["perf"][product] = rec
 
         mem["pending_alpha"] = pending[-self.MAX_PENDING_ALPHA:]
 
     def _product_prior_scale(self, product: str) -> float:
-        if product in self.AVOID:
+        if product in self.HARD_AVOID:
             return 0.0
+        if product in self.AVOID:
+            return 0.42
         if product in self.STRONG:
-            return 1.18
+            return 1.12
         if product in self.CAUTIOUS:
             return 0.72
         return 0.55
@@ -371,22 +421,116 @@ class Trader:
         return 1.0
 
     def _product_scale(self, mem: Dict[str, Any], product: str) -> float:
-        return self._product_prior_scale(product) * self._live_perf_scale(mem, product)
+        prior = self._product_prior_scale(product)
+        if prior <= 0.0:
+            return 0.0
+        live = self._live_perf_scale(mem, product)
+        return self._clip(prior * (0.55 + 0.45 * live), 0.12, 1.24)
 
     def _product_cap(self, product: str, scale: float) -> int:
         if scale <= 0:
             return 0
-        if product in self.STRONG:
-            return 8
-        if product in self.CAUTIOUS:
-            return 5
-        return 4
+        return int(self._clip(round(2 + 5 * scale), 2, 8))
 
     def _trade_key(self, product: str, tr: Any) -> str:
         return (
             f"{product}|{getattr(tr, 'timestamp', '')}|{getattr(tr, 'buyer', '')}|"
             f"{getattr(tr, 'seller', '')}|{getattr(tr, 'price', '')}|{getattr(tr, 'quantity', '')}"
         )
+
+    def _own_trade_key(self, product: str, tr: Any) -> str:
+        return self._trade_key(product, tr)
+
+    def _update_side_score(self, mem: Dict[str, Any], product: str, side: str, score: float) -> None:
+        bucket = mem.setdefault("side_perf", {}).setdefault(product, {})
+        rec = bucket.get(side, {"s": 0.0, "n": 0})
+        n = int(rec.get("n", 0))
+        lr = 0.12 if n < 8 else 0.045
+        rec["s"] = (1.0 - lr) * float(rec.get("s", 0.0)) + lr * self._clip(score, -4.0, 4.0)
+        rec["n"] = min(9999, n + 1)
+        bucket[side] = rec
+
+    def _side_quality(self, mem: Dict[str, Any], product: str, side: str) -> float:
+        rec = mem.get("side_perf", {}).get(product, {}).get(side)
+        if not rec:
+            return 0.0
+        n = int(rec.get("n", 0))
+        trust = min(1.0, n / 8.0)
+        return self._clip(trust * float(rec.get("s", 0.0)), -2.0, 2.0)
+
+    def _resolve_side_markouts(self, mem: Dict[str, Any], timestamp: int, fairs: Dict[str, float]) -> None:
+        pending = []
+        for ev in mem.get("pending_side", []):
+            product = ev.get("p")
+            if product not in fairs:
+                pending.append(ev)
+                continue
+            if timestamp - int(ev.get("t", timestamp)) < self.MARKOUT_DELAY:
+                pending.append(ev)
+                continue
+
+            side = ev.get("side", "")
+            if side not in ("bid", "ask"):
+                continue
+            sign = 1.0 if side == "bid" else -1.0
+            move = fairs[product] - float(ev.get("fair", fairs[product]))
+            vol = max(1.0, float(ev.get("vol", 1.0)))
+            self._update_side_score(mem, product, side, sign * move / vol)
+
+        mem["pending_side"] = pending[-self.MAX_PENDING_SIDE:]
+
+    def _record_own_passive_fills(
+        self,
+        mem: Dict[str, Any],
+        state: TradingState,
+        fairs: Dict[str, float],
+        spreads: Dict[str, float],
+    ) -> None:
+        seen = set(mem.get("seen_own_trades", []))
+        seen_list = list(mem.get("seen_own_trades", []))
+        last_quotes = mem.get("last_quotes", {})
+
+        for product, trades in (state.own_trades or {}).items():
+            if product not in fairs:
+                continue
+            quote = last_quotes.get(product, {})
+            bid_quote = quote.get("bid")
+            ask_quote = quote.get("ask")
+            fair = fairs[product]
+            vol = max(1.0, spreads.get(product, 1.0))
+
+            for tr in trades:
+                key = self._own_trade_key(product, tr)
+                if key in seen:
+                    continue
+                seen.add(key)
+                seen_list.append(key)
+
+                buyer = getattr(tr, "buyer", "") or ""
+                seller = getattr(tr, "seller", "") or ""
+                price = int(getattr(tr, "price", 0))
+                side = ""
+
+                if buyer == "SUBMISSION" and bid_quote is not None and price <= int(bid_quote) + 1:
+                    side = "bid"
+                elif seller == "SUBMISSION" and ask_quote is not None and price >= int(ask_quote) - 1:
+                    side = "ask"
+                elif not buyer and not seller:
+                    if bid_quote is not None and price <= int(bid_quote) + 1:
+                        side = "bid"
+                    elif ask_quote is not None and price >= int(ask_quote) - 1:
+                        side = "ask"
+
+                if side:
+                    mem["pending_side"].append({
+                        "p": product,
+                        "side": side,
+                        "t": state.timestamp,
+                        "fair": fair,
+                        "vol": vol,
+                    })
+
+        mem["seen_own_trades"] = seen_list[-self.MAX_SEEN_OWN_TRADES:]
 
     def _update_cp_score(self, mem: Dict[str, Any], key: str, score: float) -> None:
         if not key:
@@ -437,14 +581,13 @@ class Trader:
         return self._clip(out, -3.0, 3.0)
 
     def _counterparty_flow(self, mem: Dict[str, Any], state: TradingState, product: str, fair: float, vol: float) -> float:
-        trades = state.market_trades.get(product, [])
-        if not trades:
-            return 0.0
-
+        trades = (state.market_trades or {}).get(product, [])
         seen = set(mem.get("seen_trades", []))
         seen_list = list(mem.get("seen_trades", []))
         fam = self._family(product)
         flow = 0.0
+        tape = mem.setdefault("tape_flow", {})
+        tape[product] = 0.88 * float(tape.get(product, 0.0))
 
         for tr in trades:
             key = self._trade_key(product, tr)
@@ -461,6 +604,14 @@ class Trader:
             price = float(getattr(tr, "price", fair))
             qty = max(1, abs(int(getattr(tr, "quantity", 1))))
             qscale = min(2.0, math.sqrt(qty))
+            if is_new:
+                signed = 0.0
+                if price > fair:
+                    signed = 1.0
+                elif price < fair:
+                    signed = -1.0
+                if signed:
+                    tape[product] = self._clip(float(tape.get(product, 0.0)) + signed * qscale, -6.0, 6.0)
 
             # A trade through/above fair tags the buyer as potentially informed upward.
             if buyer and buyer != "SUBMISSION" and price >= fair:
@@ -477,7 +628,15 @@ class Trader:
                         mem["pending_cp"].append({"k": k, "p": product, "t": state.timestamp, "fair": fair, "sign": -1.0, "vol": vol})
 
         mem["seen_trades"] = seen_list[-self.MAX_SEEN_TRADES:]
-        return self._clip(flow, -5.0, 5.0)
+
+        fam_vals = [
+            float(v)
+            for p, v in tape.items()
+            if p != product and self._family(p) == fam
+        ]
+        fam_tape = self._mean(fam_vals) if fam_vals else 0.0
+        tape_alpha = self._clip(float(tape.get(product, 0.0)) / 3.0 + 0.25 * fam_tape / 3.0, -2.0, 2.0)
+        return self._clip(flow + 0.55 * tape_alpha, -5.0, 5.0)
 
     def _signals(
         self,
@@ -533,18 +692,23 @@ class Trader:
         flow: float,
         position: int,
         scale: float,
+        regime: Dict[str, float],
     ) -> float:
         cap = max(1.0, float(self._product_cap(product, scale)))
         inv = -position / cap
+        rel_scale = float(regime.get("rel", 1.0))
+        trend_scale = float(regime.get("trend", 1.0))
+        micro_scale = float(regime.get("micro", 1.0))
+        rel *= rel_scale
 
         # Original v1 bias: family relative value dominates. Mean reversion helps inside
         # each product. Trend is allowed only for names where the uploaded data showed it helps.
         if product in self.TREND_NAMES:
-            alpha = 0.55 * rel + 0.25 * own_mr + 0.75 * trend + 0.25 * micro + 0.45 * flow + 0.25 * inv
+            alpha = 0.55 * rel + 0.25 * own_mr + 0.75 * trend_scale * trend + 0.25 * micro_scale * micro + 0.45 * flow + 0.25 * inv
         elif product in self.FAMILY_NAMES:
-            alpha = 1.20 * rel + 0.20 * own_mr + 0.18 * trend + 0.30 * micro + 0.45 * flow + 0.25 * inv
+            alpha = 1.20 * rel + 0.20 * own_mr + 0.18 * trend_scale * trend + 0.30 * micro_scale * micro + 0.45 * flow + 0.25 * inv
         else:
-            alpha = 1.10 * rel + 0.35 * own_mr + 0.10 * trend + 0.32 * micro + 0.45 * flow + 0.28 * inv
+            alpha = 1.10 * rel + 0.35 * own_mr + 0.10 * trend_scale * trend + 0.32 * micro_scale * micro + 0.45 * flow + 0.28 * inv
 
         # If trend strongly disagrees with mean-reversion/relative-value, reduce conviction.
         rv = rel + 0.45 * own_mr
@@ -569,6 +733,75 @@ class Trader:
             desired *= 1.20
 
         return int(self._clip(round(desired), -cap, cap))
+
+    def _update_inventory_state(self, mem: Dict[str, Any], timestamp: int, positions: Dict[str, int]) -> None:
+        state = mem.setdefault("position_state", {})
+        products = set(state.keys()) | set(positions.keys())
+        for product in products:
+            pos = int(positions.get(product, 0))
+            rec = state.get(product, {"q": 0, "since": timestamp})
+            old = int(rec.get("q", 0))
+            if pos == 0:
+                state[product] = {"q": 0, "since": timestamp}
+            elif old == 0 or old * pos < 0:
+                state[product] = {"q": pos, "since": timestamp}
+            else:
+                rec["q"] = pos
+                state[product] = rec
+
+    def _inventory_age(self, mem: Dict[str, Any], product: str, timestamp: int) -> int:
+        rec = mem.get("position_state", {}).get(product)
+        if not rec:
+            return 0
+        return max(0, timestamp - int(rec.get("since", timestamp)))
+
+    def _state_adjust_target(
+        self,
+        mem: Dict[str, Any],
+        product: str,
+        position: int,
+        target: int,
+        alpha: float,
+        rel: float,
+        own_mr: float,
+        trend: float,
+        vol: float,
+        spread: float,
+        timestamp: int,
+    ) -> Tuple[int, bool]:
+        if position == 0 and abs(alpha) >= 0.55:
+            return target, False
+
+        rv = rel + 0.45 * own_mr
+        conflict = rv * trend < 0.0 and abs(trend) > 0.85 and abs(rv) > 0.35
+        unsupported_inventory = position != 0 and position * alpha <= 0.15 * abs(position)
+        age = self._inventory_age(mem, product, timestamp)
+        rec = mem.get("perf", {}).get(product, {"s": 0.0, "n": 0})
+        live_s = float(rec.get("s", 0.0))
+        peak_s = float(rec.get("peak", live_s))
+        live_bad = int(rec.get("n", 0)) >= 8 and live_s < -0.10
+        live_giveback = int(rec.get("n", 0)) >= 10 and peak_s > 0.35 and live_s < peak_s - 0.35
+        noisy = vol > max(2.0, 1.35 * spread)
+
+        repair_only = False
+        adjusted = target
+
+        if abs(alpha) < 0.45:
+            adjusted = int(round(0.45 * position))
+            repair_only = True
+
+        if conflict and (live_bad or live_giveback or noisy or abs(alpha) < 0.90):
+            adjusted = int(round(0.50 * adjusted))
+            repair_only = True
+
+        if age >= self.INVENTORY_AGE_LIMIT and unsupported_inventory:
+            adjusted = int(round(0.35 * position))
+            repair_only = True
+        elif age >= 2 * self.INVENTORY_AGE_LIMIT and position != 0 and abs(alpha) < 0.85:
+            adjusted = int(round(0.50 * position))
+            repair_only = True
+
+        return adjusted, repair_only
 
     def _add_order(
         self,
@@ -618,6 +851,8 @@ class Trader:
         vol: float,
         spread: float,
         scale: float,
+        mem: Dict[str, Any],
+        repair_only: bool,
     ) -> List[Order]:
         bid, bid_v, ask, ask_v = self._best(depth)
         orders: List[Order] = []
@@ -710,6 +945,27 @@ class Trader:
             if position <= 0:
                 sell_sz = 0
 
+        bid_quality = self._side_quality(mem, product, "bid")
+        ask_quality = self._side_quality(mem, product, "ask")
+        bid_conf = alpha + 0.30 * top_imb + bid_quality
+        ask_conf = -alpha - 0.30 * top_imb + ask_quality
+
+        if repair_only or abs(alpha) < 0.50:
+            if position >= 0:
+                buy_sz = 0
+            if position <= 0:
+                sell_sz = 0
+
+        if bid_conf < -0.25 and position >= 0:
+            buy_sz = 0
+        if ask_conf < -0.25 and position <= 0:
+            sell_sz = 0
+
+        if bid_quality < -0.55 and position >= 0:
+            buy_sz = 0
+        if ask_quality < -0.55 and position <= 0:
+            sell_sz = 0
+
         if buy_sz > 0 and alpha > -1.55:
             buy_used, sell_used = self._add_order(orders, product, bid_px, buy_sz, position, buy_used, sell_used)
         if sell_sz > 0 and alpha < 1.55:
@@ -717,9 +973,15 @@ class Trader:
 
         return orders
 
-    def _time_stopped(self, product: str, timestamp: int) -> bool:
-        stop = self.TIME_STOPS.get(product)
-        return stop is not None and timestamp >= stop
+    def _passive_quote_record(self, orders: List[Order], bid: int, ask: int) -> Dict[str, int]:
+        record: Dict[str, int] = {}
+        bids = [int(o.price) for o in orders if int(o.quantity) > 0 and int(o.price) < ask]
+        asks = [int(o.price) for o in orders if int(o.quantity) < 0 and int(o.price) > bid]
+        if bids:
+            record["bid"] = max(bids)
+        if asks:
+            record["ask"] = min(asks)
+        return record
 
     def run(self, state: TradingState):
         mem = self._load_memory(state.traderData)
@@ -735,9 +997,15 @@ class Trader:
                 spreads[product] = self._spread(depth)
 
         family_mu = self._family_log_means(fairs)
+        family_regimes = self._family_regimes(mem, fairs)
 
+        self._update_inventory_state(mem, state.timestamp, state.position)
         self._resolve_alpha_markouts(mem, state.timestamp, fairs)
         self._resolve_cp_markouts(mem, state.timestamp, fairs)
+        self._resolve_side_markouts(mem, state.timestamp, fairs)
+        self._record_own_passive_fills(mem, state, fairs, spreads)
+
+        next_quotes: Dict[str, Dict[str, int]] = {}
 
         for product, depth in state.order_depths.items():
             if product not in fairs:
@@ -748,7 +1016,7 @@ class Trader:
             fair = fairs[product]
             spread = spreads.get(product, 1.0)
 
-            if product in self.AVOID or self._time_stopped(product, state.timestamp):
+            if product in self.HARD_AVOID:
                 result[product] = self._flatten_orders(product, depth, position)
                 continue
 
@@ -756,10 +1024,30 @@ class Trader:
             rel, own_mr, trend, micro, vol = self._signals(mem, product, fair, resid, depth)
             flow = self._counterparty_flow(mem, state, product, fair, vol)
             scale = self._product_scale(mem, product)
-            alpha = self._combine_alpha(product, rel, own_mr, trend, micro, flow, position, scale)
+            alpha = self._combine_alpha(
+                product,
+                rel,
+                own_mr,
+                trend,
+                micro,
+                flow,
+                position,
+                scale,
+                family_regimes.get(self._family(product), {}),
+            )
 
             target = self._target_position(product, position, alpha, scale, vol, spread)
-            result[product] = self._make_orders(product, depth, fair, alpha, target, position, vol, spread, scale)
+            target, repair_only = self._state_adjust_target(
+                mem, product, position, target, alpha, rel, own_mr, trend, vol, spread, state.timestamp
+            )
+            orders = self._make_orders(product, depth, fair, alpha, target, position, vol, spread, scale, mem, repair_only)
+            result[product] = orders
+
+            bid, _, ask, _ = self._best(depth)
+            if bid is not None and ask is not None:
+                quote_record = self._passive_quote_record(orders, bid, ask)
+                if quote_record:
+                    next_quotes[product] = quote_record
 
             if scale > 0.0 and abs(alpha) > 0.45:
                 mem["pending_alpha"].append({
@@ -778,5 +1066,7 @@ class Trader:
 
             resid = math.log(fair) - family_mu.get(self._family(product), math.log(fair))
             self._append(mem, "resid_hist", product, resid, self.RESID_HISTORY)
+
+        mem["last_quotes"] = next_quotes
 
         return result, 0, self._save_memory(mem)
