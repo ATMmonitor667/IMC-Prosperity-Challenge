@@ -7,17 +7,18 @@ import math
 
 class Trader:
     """
-    IMC Prosperity 4 Round 5 v14 robust regime-gated refinement.
+    IMC Prosperity 4 Round 5 v16 minimal robust quote-toxicity.
 
     This version is built from the only architecture that actually worked well in your
     uploaded runs: adaptive counterparty-aware relative value plus safe market making.
 
-    Changes versus v12/v13:
+    Changes versus v10:
     - Keeps the original family-relative value and microprice engine.
     - Fixes the true Round 5 hard limit: 10 per product.
     - Clips every order before it is sent, so the exchange should not reject whole product legs.
-    - Keeps v10 product priors and execution unchanged.
-    - Replaces exact timestamp peak locks with robust regime gates based on product class, live markout quality, and signal deterioration.
+    - Keeps v10 product priors, leak cuts, and execution shape.
+    - Adds a non-overfit quote-toxicity guard based on live top-of-book imbalance and spread.
+    - Does not use exact timestamp exits or product-level curve-fitted peak locks.
     - Uses warm-up before trusting relative value so permanent level differences are not
       mistaken for mispricing.
     - Adds online alpha markout scoring. If a product starts losing live, its size decays.
@@ -154,49 +155,6 @@ class Trader:
         "UV_VISOR_ORANGE",
         "ROBOT_IRONING",
         "PANEL_4X4",
-    }
-
-    # Robust regime-gated risk overlay.
-    # v13 used exact timestamps, which can overfit one public trajectory. v14 instead
-    # uses product classes plus live markout/signal quality. It still protects the
-    # same giveback-prone products, but it does not assume their peak occurs at one exact tick.
-    CORE_WINNERS = {
-        "PEBBLES_XS",
-        "PANEL_4X4",
-        "MICROCHIP_SQUARE",
-        "OXYGEN_SHAKE_GARLIC",
-        "GALAXY_SOUNDS_BLACK_HOLES",
-        "TRANSLATOR_ECLIPSE_CHARCOAL",
-        "TRANSLATOR_ASTRO_BLACK",
-        "OXYGEN_SHAKE_CHOCOLATE",
-    }
-
-    GIVEBACK_PRONE = {
-        "ROBOT_MOPPING",
-        "SNACKPACK_STRAWBERRY",
-        "GALAXY_SOUNDS_SOLAR_FLAMES",
-        "SLEEP_POD_POLYESTER",
-        "SNACKPACK_VANILLA",
-        "SLEEP_POD_SUEDE",
-        "UV_VISOR_MAGENTA",
-        "ROBOT_VACUUMING",
-        "GALAXY_SOUNDS_SOLAR_WINDS",
-        "SLEEP_POD_NYLON",
-        "SNACKPACK_PISTACHIO",
-        "MICROCHIP_OVAL",
-        "MICROCHIP_CIRCLE",
-        "TRANSLATOR_GRAPHITE_MIST",
-    }
-
-    HIGH_VARIANCE = {
-        "TRANSLATOR_GRAPHITE_MIST",
-        "SNACKPACK_PISTACHIO",
-        "SNACKPACK_VANILLA",
-        "UV_VISOR_MAGENTA",
-        "MICROCHIP_OVAL",
-        "MICROCHIP_CIRCLE",
-        "SLEEP_POD_SUEDE",
-        "ROBOT_VACUUMING",
     }
 
     def _default_memory(self) -> Dict[str, Any]:
@@ -720,79 +678,37 @@ class Trader:
             sell_sz = 0
             buy_sz = max(1, buy_sz)
 
+        # Non-overfit quote-toxicity guard.
+        # A lot of the losses came from passively quoting both sides while the visible book
+        # was leaning hard against one side. This rule does not use timestamps or fitted
+        # product exits; it only reacts to current top-of-book pressure.
+        top_den = max(1, bid_v + ask_v)
+        top_imb = (bid_v - ask_v) / top_den
+
+        # If the bid side is thin and ask liquidity dominates, avoid adding passive bids
+        # unless alpha strongly says we should buy or we are repairing a short.
+        if top_imb < -0.58 and alpha < 0.90 and position >= 0:
+            buy_sz = 0
+
+        # If the ask side is thin and bid liquidity dominates, avoid adding passive asks
+        # unless alpha strongly says we should sell or we are repairing a long.
+        if top_imb > 0.58 and alpha > -0.90 and position <= 0:
+            sell_sz = 0
+
+        # On tight-spread cautious products, tiny two-sided quotes often churn without edge.
+        # Keep inventory-repair quotes, but do not open new two-sided risk on weak signals.
+        if product in self.CAUTIOUS and spread <= 2 and abs(alpha) < 0.65:
+            if position >= 0:
+                buy_sz = 0
+            if position <= 0:
+                sell_sz = 0
+
         if buy_sz > 0 and alpha > -1.55:
             buy_used, sell_used = self._add_order(orders, product, bid_px, buy_sz, position, buy_used, sell_used)
         if sell_sz > 0 and alpha < 1.55:
             buy_used, sell_used = self._add_order(orders, product, ask_px, -sell_sz, position, buy_used, sell_used)
 
         return orders
-
-    def _regime_multiplier(
-        self,
-        mem: Dict[str, Any],
-        product: str,
-        timestamp: int,
-        alpha: float,
-        rel: float,
-        own_mr: float,
-        trend: float,
-        flow: float,
-    ) -> float:
-        """
-        Robust alternative to exact timestamp stops.
-
-        Returns 1.0 for normal trading, a fractional multiplier for reduced quoting,
-        and 0.0 to flatten / stop opening risk. The gate uses broad time regimes and
-        signal health rather than a fitted per-product peak timestamp.
-        """
-        if product in self.CORE_WINNERS:
-            return 1.0
-
-        rec = mem.get("perf", {}).get(product, {"s": 0.0, "n": 0})
-        n = int(rec.get("n", 0))
-        perf = float(rec.get("s", 0.0))
-
-        rv = rel + 0.45 * own_mr
-        conflict = (rv * trend < 0 and abs(trend) > 1.10)
-        weak_alpha = abs(alpha) < 0.55
-        bad_perf = n >= 7 and perf < -0.16
-        very_bad_perf = n >= 7 and perf < -0.42
-        no_flow_support = abs(flow) < 0.20
-
-        # High-variance products are allowed to make money early, but they must
-        # prove live edge to continue deep into the round.
-        if product in self.HIGH_VARIANCE:
-            if timestamp >= 60000 and very_bad_perf:
-                return 0.0
-            if timestamp >= 65000 and bad_perf and (weak_alpha or conflict):
-                return 0.0
-            if timestamp >= 76000 and (weak_alpha and no_flow_support):
-                return 0.35
-            if timestamp >= 90000 and (bad_perf or weak_alpha):
-                return 0.0
-            return 1.0
-
-        # Giveback-prone names are only reduced after broad mid/late regimes
-        # and only when current signal quality is deteriorating.
-        if product in self.GIVEBACK_PRONE:
-            if timestamp >= 70000 and very_bad_perf:
-                return 0.0
-            if timestamp >= 78000 and bad_perf and conflict:
-                return 0.0
-            if timestamp >= 88000 and (bad_perf or (weak_alpha and no_flow_support)):
-                return 0.45
-            if timestamp >= 96000 and weak_alpha:
-                return 0.0
-            return 1.0
-
-        # Generic cautious late-round de-risking.
-        if product in self.CAUTIOUS:
-            if timestamp >= 74000 and very_bad_perf:
-                return 0.0
-            if timestamp >= 93000 and (bad_perf or weak_alpha):
-                return 0.40
-
-        return 1.0
 
     def run(self, state: TradingState):
         mem = self._load_memory(state.traderData)
@@ -830,14 +746,6 @@ class Trader:
             flow = self._counterparty_flow(mem, state, product, fair, vol)
             scale = self._product_scale(mem, product)
             alpha = self._combine_alpha(product, rel, own_mr, trend, micro, flow, position, scale)
-
-            regime_mult = self._regime_multiplier(mem, product, state.timestamp, alpha, rel, own_mr, trend, flow)
-            if regime_mult <= 0.0:
-                result[product] = self._flatten_orders(product, depth, position)
-                continue
-            if regime_mult < 1.0:
-                scale *= regime_mult
-                alpha *= regime_mult
 
             target = self._target_position(product, position, alpha, scale, vol, spread)
             result[product] = self._make_orders(product, depth, fair, alpha, target, position, vol, spread, scale)

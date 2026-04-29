@@ -7,20 +7,18 @@ import math
 
 class Trader:
     """
-    IMC Prosperity 4 Round 5 v14 robust regime-gated refinement.
+    IMC Prosperity 4 Round 5 v15 robust structural trailing-risk.
 
     This version is built from the only architecture that actually worked well in your
     uploaded runs: adaptive counterparty-aware relative value plus safe market making.
 
-    Changes versus v12/v13:
+    Changes versus v10/v14:
     - Keeps the original family-relative value and microprice engine.
-    - Fixes the true Round 5 hard limit: 10 per product.
-    - Clips every order before it is sent, so the exchange should not reject whole product legs.
-    - Keeps v10 product priors and execution unchanged.
-    - Replaces exact timestamp peak locks with robust regime gates based on product class, live markout quality, and signal deterioration.
-    - Uses warm-up before trusting relative value so permanent level differences are not
-      mistaken for mispricing.
-    - Adds online alpha markout scoring. If a product starts losing live, its size decays.
+    - Keeps the true Round 5 hard limit: 10 per product.
+    - Keeps v10 product priors and execution mostly unchanged.
+    - Avoids exact timestamp exits, so it is less overfit than v12/v13.
+    - Adds compact product-level PnL state with broad trailing-risk gates.
+    - Uses product classes, markout quality, and realized drawdown instead of fixed peak timestamps.
     - Keeps trader-ID learning as an overlay, not the main signal, because the uploaded logs
       mostly had blank IDs.
     """
@@ -156,10 +154,8 @@ class Trader:
         "PANEL_4X4",
     }
 
-    # Robust regime-gated risk overlay.
-    # v13 used exact timestamps, which can overfit one public trajectory. v14 instead
-    # uses product classes plus live markout/signal quality. It still protects the
-    # same giveback-prone products, but it does not assume their peak occurs at one exact tick.
+
+    # Stable core winners should not be shut down by generic risk gates.
     CORE_WINNERS = {
         "PEBBLES_XS",
         "PANEL_4X4",
@@ -171,6 +167,8 @@ class Trader:
         "OXYGEN_SHAKE_CHOCOLATE",
     }
 
+    # These products can be profitable but repeatedly show large post-peak giveback.
+    # We control them with broad realized-PnL trailing rules, not exact timestamps.
     GIVEBACK_PRONE = {
         "ROBOT_MOPPING",
         "SNACKPACK_STRAWBERRY",
@@ -183,11 +181,11 @@ class Trader:
         "GALAXY_SOUNDS_SOLAR_WINDS",
         "SLEEP_POD_NYLON",
         "SNACKPACK_PISTACHIO",
-        "MICROCHIP_OVAL",
-        "MICROCHIP_CIRCLE",
-        "TRANSLATOR_GRAPHITE_MIST",
+        "PEBBLES_L",
+        "PEBBLES_XL",
     }
 
+    # High-variance names require smaller drawdown tolerance.
     HIGH_VARIANCE = {
         "TRANSLATOR_GRAPHITE_MIST",
         "SNACKPACK_PISTACHIO",
@@ -197,6 +195,7 @@ class Trader:
         "MICROCHIP_CIRCLE",
         "SLEEP_POD_SUEDE",
         "ROBOT_VACUUMING",
+        "UV_VISOR_AMBER",
     }
 
     def _default_memory(self) -> Dict[str, Any]:
@@ -209,6 +208,11 @@ class Trader:
             "cp_score": {},
             "pending_cp": [],
             "seen_trades": [],
+            "cash": {},
+            "product_pnl": {},
+            "pnl_peak": {},
+            "risk_locked": {},
+            "last_own_ts": {},
         }
 
     def _load_memory(self, data: str) -> Dict[str, Any]:
@@ -727,7 +731,56 @@ class Trader:
 
         return orders
 
-    def _regime_multiplier(
+
+    def _update_realized_risk_state(self, mem: Dict[str, Any], state: TradingState, fairs: Dict[str, float]) -> None:
+        """
+        Compact product-level PnL tracking.
+
+        This avoids the v11 mistake of keeping a huge seen-own-trades list. In Prosperity,
+        own_trades are normally incremental; to be defensive, we keep only the last processed
+        own-trade timestamp per product.
+        """
+        cash = mem.setdefault("cash", {})
+        product_pnl = mem.setdefault("product_pnl", {})
+        pnl_peak = mem.setdefault("pnl_peak", {})
+        last_own_ts = mem.setdefault("last_own_ts", {})
+
+        for product, trades in getattr(state, "own_trades", {}).items():
+            last_ts = int(last_own_ts.get(product, -1))
+            max_ts = last_ts
+
+            for tr in trades:
+                ts = int(getattr(tr, "timestamp", state.timestamp))
+                if ts <= last_ts:
+                    continue
+
+                price = float(getattr(tr, "price", 0.0))
+                qty = abs(int(getattr(tr, "quantity", 0)))
+                buyer = getattr(tr, "buyer", "") or ""
+                seller = getattr(tr, "seller", "") or ""
+
+                if qty <= 0:
+                    continue
+
+                if buyer == "SUBMISSION":
+                    cash[product] = float(cash.get(product, 0.0)) - price * qty
+                elif seller == "SUBMISSION":
+                    cash[product] = float(cash.get(product, 0.0)) + price * qty
+
+                if ts > max_ts:
+                    max_ts = ts
+
+            if max_ts > last_ts:
+                last_own_ts[product] = max_ts
+
+        for product, fair in fairs.items():
+            pos = int(state.position.get(product, 0))
+            pnl = float(cash.get(product, 0.0)) + pos * float(fair)
+            product_pnl[product] = pnl
+            old_peak = float(pnl_peak.get(product, pnl))
+            pnl_peak[product] = max(old_peak, pnl)
+
+    def _realized_risk_multiplier(
         self,
         mem: Dict[str, Any],
         product: str,
@@ -739,60 +792,63 @@ class Trader:
         flow: float,
     ) -> float:
         """
-        Robust alternative to exact timestamp stops.
+        Non-overfit realized-risk gate.
 
-        Returns 1.0 for normal trading, a fractional multiplier for reduced quoting,
-        and 0.0 to flatten / stop opening risk. The gate uses broad time regimes and
-        signal health rather than a fitted per-product peak timestamp.
+        It does not say "exit product X at timestamp Y." Instead, it asks whether a
+        non-core product has made money and then started giving back a statistically large
+        fraction of that product-level profit while current signal quality is weak.
         """
         if product in self.CORE_WINNERS:
             return 1.0
+
+        product_pnl = mem.get("product_pnl", {})
+        pnl_peak = mem.get("pnl_peak", {})
+        pnl = float(product_pnl.get(product, 0.0))
+        peak = float(pnl_peak.get(product, pnl))
+        drawdown = peak - pnl
 
         rec = mem.get("perf", {}).get(product, {"s": 0.0, "n": 0})
         n = int(rec.get("n", 0))
         perf = float(rec.get("s", 0.0))
 
         rv = rel + 0.45 * own_mr
-        conflict = (rv * trend < 0 and abs(trend) > 1.10)
-        weak_alpha = abs(alpha) < 0.55
-        bad_perf = n >= 7 and perf < -0.16
-        very_bad_perf = n >= 7 and perf < -0.42
-        no_flow_support = abs(flow) < 0.20
+        conflict = rv * trend < 0 and abs(trend) > 1.05
+        weak_signal = abs(alpha) < 0.65
+        bad_markout = n >= 7 and perf < -0.18
+        very_bad_markout = n >= 7 and perf < -0.42
+        no_flow = abs(flow) < 0.25
 
-        # High-variance products are allowed to make money early, but they must
-        # prove live edge to continue deep into the round.
-        if product in self.HIGH_VARIANCE:
-            if timestamp >= 60000 and very_bad_perf:
-                return 0.0
-            if timestamp >= 65000 and bad_perf and (weak_alpha or conflict):
-                return 0.0
-            if timestamp >= 76000 and (weak_alpha and no_flow_support):
-                return 0.35
-            if timestamp >= 90000 and (bad_perf or weak_alpha):
-                return 0.0
-            return 1.0
+        # Hard loss stop for non-core names. This is broad and structural, not product-specific.
+        if timestamp >= 30000 and product not in self.STRONG and pnl < -500:
+            return 0.0
+        if timestamp >= 50000 and pnl < -850:
+            return 0.0
 
-        # Giveback-prone names are only reduced after broad mid/late regimes
-        # and only when current signal quality is deteriorating.
+        # If a product has proven it can make money but starts giving back, stop or reduce.
         if product in self.GIVEBACK_PRONE:
-            if timestamp >= 70000 and very_bad_perf:
+            if timestamp >= 45000 and peak >= 1000 and drawdown >= max(450.0, 0.33 * peak):
                 return 0.0
-            if timestamp >= 78000 and bad_perf and conflict:
-                return 0.0
-            if timestamp >= 88000 and (bad_perf or (weak_alpha and no_flow_support)):
-                return 0.45
-            if timestamp >= 96000 and weak_alpha:
-                return 0.0
-            return 1.0
+            if timestamp >= 45000 and peak >= 650 and drawdown >= max(325.0, 0.28 * peak) and (weak_signal or conflict or bad_markout):
+                return 0.25
+            if timestamp >= 65000 and peak >= 450 and drawdown >= max(275.0, 0.35 * peak) and no_flow:
+                return 0.35
 
-        # Generic cautious late-round de-risking.
-        if product in self.CAUTIOUS:
-            if timestamp >= 74000 and very_bad_perf:
+        # High variance products need stronger evidence to keep trading after a drawdown.
+        if product in self.HIGH_VARIANCE:
+            if timestamp >= 35000 and peak >= 350 and drawdown >= max(250.0, 0.45 * peak) and (weak_signal or bad_markout):
                 return 0.0
-            if timestamp >= 93000 and (bad_perf or weak_alpha):
-                return 0.40
+            if timestamp >= 55000 and (weak_signal and no_flow and perf <= 0.0):
+                return 0.45
+
+        # Generic late-round de-risking for non-core/non-strong products when signal quality is poor.
+        if timestamp >= 85000 and product not in self.STRONG:
+            if very_bad_markout or (weak_signal and conflict):
+                return 0.0
+            if weak_signal and no_flow:
+                return 0.50
 
         return 1.0
+
 
     def run(self, state: TradingState):
         mem = self._load_memory(state.traderData)
@@ -811,6 +867,7 @@ class Trader:
 
         self._resolve_alpha_markouts(mem, state.timestamp, fairs)
         self._resolve_cp_markouts(mem, state.timestamp, fairs)
+        self._update_realized_risk_state(mem, state, fairs)
 
         for product, depth in state.order_depths.items():
             if product not in fairs:
@@ -831,13 +888,13 @@ class Trader:
             scale = self._product_scale(mem, product)
             alpha = self._combine_alpha(product, rel, own_mr, trend, micro, flow, position, scale)
 
-            regime_mult = self._regime_multiplier(mem, product, state.timestamp, alpha, rel, own_mr, trend, flow)
-            if regime_mult <= 0.0:
+            risk_mult = self._realized_risk_multiplier(mem, product, state.timestamp, alpha, rel, own_mr, trend, flow)
+            if risk_mult <= 0.0:
                 result[product] = self._flatten_orders(product, depth, position)
                 continue
-            if regime_mult < 1.0:
-                scale *= regime_mult
-                alpha *= regime_mult
+            if risk_mult < 1.0:
+                scale *= risk_mult
+                alpha *= risk_mult
 
             target = self._target_position(product, position, alpha, scale, vol, spread)
             result[product] = self._make_orders(product, depth, fair, alpha, target, position, vol, spread, scale)
