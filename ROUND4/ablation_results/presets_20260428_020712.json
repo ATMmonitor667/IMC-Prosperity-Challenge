@@ -1,0 +1,82 @@
+[
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_current_best.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 18574.0,
+      "4-2": 10070.0,
+      "4-3": 16788.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 15.116,
+    "final_positions": {
+      "HYDROGEL_PACK": 13,
+      "VELVETFRUIT_EXTRACT": 8,
+      "VEV_4000": 14,
+      "VEV_5000": 2,
+      "VEV_5100": 2,
+      "VEV_5200": 2,
+      "VEV_5300": 30,
+      "VEV_5400": 20,
+      "VEV_5500": 5,
+      "VEV_6000": 60,
+      "VEV_6500": 60
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-06-57.log",
+    "max_drawdown": 1811.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14153.0,
+        "VELVETFRUIT_EXTRACT": 1457.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": -16.0,
+        "VEV_5300": 43.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4535.0,
+        "VELVETFRUIT_EXTRACT": 2886.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 56.0,
+        "VEV_5300": 228.0,
+        "VEV_5400": 38.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11727.0,
+        "VELVETFRUIT_EXTRACT": 2448.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 8.0,
+        "VEV_5100": 5.0,
+        "VEV_5200": -27.0,
+        "VEV_5300": -84.0,
+        "VEV_5400": 6.0,
+        "VEV_5500": 6.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 45432.0,
+    "trade_count": 2407,
+    "traderdata_max_size": null,
+    "variant": "PRESET_current_best",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_current_best.py"
+  }
+]

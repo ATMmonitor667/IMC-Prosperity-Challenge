@@ -1,0 +1,1279 @@
+[
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_current_best.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 18574.0,
+      "4-2": 10070.0,
+      "4-3": 16788.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 15.04,
+    "final_positions": {
+      "HYDROGEL_PACK": 13,
+      "VELVETFRUIT_EXTRACT": 8,
+      "VEV_4000": 14,
+      "VEV_5000": 2,
+      "VEV_5100": 2,
+      "VEV_5200": 2,
+      "VEV_5300": 30,
+      "VEV_5400": 20,
+      "VEV_5500": 5,
+      "VEV_6000": 60,
+      "VEV_6500": 60
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-07-21.log",
+    "max_drawdown": 1811.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14153.0,
+        "VELVETFRUIT_EXTRACT": 1457.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": -16.0,
+        "VEV_5300": 43.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4535.0,
+        "VELVETFRUIT_EXTRACT": 2886.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 56.0,
+        "VEV_5300": 228.0,
+        "VEV_5400": 38.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11727.0,
+        "VELVETFRUIT_EXTRACT": 2448.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 8.0,
+        "VEV_5100": 5.0,
+        "VEV_5200": -27.0,
+        "VEV_5300": -84.0,
+        "VEV_5400": 6.0,
+        "VEV_5500": 6.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 45432.0,
+    "trade_count": 2407,
+    "traderdata_max_size": null,
+    "variant": "PRESET_current_best",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_current_best.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_core_three_only.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 18330.0,
+      "4-2": 10140.0,
+      "4-3": 17108.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 10.387,
+    "final_positions": {
+      "HYDROGEL_PACK": 16,
+      "VELVETFRUIT_EXTRACT": 3,
+      "VEV_4000": 14
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-07-37.log",
+    "max_drawdown": 1829.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14064.0,
+        "VELVETFRUIT_EXTRACT": 1349.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4540.0,
+        "VELVETFRUIT_EXTRACT": 3292.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11701.0,
+        "VELVETFRUIT_EXTRACT": 2728.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 45578.0,
+    "trade_count": 2339,
+    "traderdata_max_size": null,
+    "variant": "PRESET_core_three_only",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_core_three_only.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_hydro_only.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 14153.0,
+      "4-2": 4535.0,
+      "4-3": 11727.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 8.951,
+    "final_positions": {
+      "HYDROGEL_PACK": 13
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-07-48.log",
+    "max_drawdown": 1750.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14153.0,
+        "VELVETFRUIT_EXTRACT": 0.0,
+        "VEV_4000": 0.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4535.0,
+        "VELVETFRUIT_EXTRACT": 0.0,
+        "VEV_4000": 0.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11727.0,
+        "VELVETFRUIT_EXTRACT": 0.0,
+        "VEV_4000": 0.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 30415.0,
+    "trade_count": 817,
+    "traderdata_max_size": null,
+    "variant": "PRESET_hydro_only",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_hydro_only.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_velvet_only.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 1457.0,
+      "4-2": 2886.0,
+      "4-3": 2448.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 8.797,
+    "final_positions": {
+      "VELVETFRUIT_EXTRACT": 8
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-07-58.log",
+    "max_drawdown": 773.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 0.0,
+        "VELVETFRUIT_EXTRACT": 1457.0,
+        "VEV_4000": 0.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 0.0,
+        "VELVETFRUIT_EXTRACT": 2886.0,
+        "VEV_4000": 0.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 0.0,
+        "VELVETFRUIT_EXTRACT": 2448.0,
+        "VEV_4000": 0.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 6791.0,
+    "trade_count": 1059,
+    "traderdata_max_size": null,
+    "variant": "PRESET_velvet_only",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_velvet_only.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_vev4000_only.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 2916.0,
+      "4-2": 2308.0,
+      "4-3": 2679.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 9.027,
+    "final_positions": {
+      "VEV_4000": 14
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-08-08.log",
+    "max_drawdown": 909.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 0.0,
+        "VELVETFRUIT_EXTRACT": 0.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 0.0,
+        "VELVETFRUIT_EXTRACT": 0.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 0.0,
+        "VELVETFRUIT_EXTRACT": 0.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 7903.0,
+    "trade_count": 424,
+    "traderdata_max_size": null,
+    "variant": "PRESET_vev4000_only",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_vev4000_only.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_hydro_velvet_vev4000.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 18526.0,
+      "4-2": 9728.0,
+      "4-3": 16854.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 11.646,
+    "final_positions": {
+      "HYDROGEL_PACK": 13,
+      "VELVETFRUIT_EXTRACT": 8,
+      "VEV_4000": 14
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-08-18.log",
+    "max_drawdown": 1815.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14153.0,
+        "VELVETFRUIT_EXTRACT": 1457.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4535.0,
+        "VELVETFRUIT_EXTRACT": 2886.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11727.0,
+        "VELVETFRUIT_EXTRACT": 2448.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 45108.0,
+    "trade_count": 2300,
+    "traderdata_max_size": null,
+    "variant": "PRESET_hydro_velvet_vev4000",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_hydro_velvet_vev4000.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_core_plus_deep_vev.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 18526.0,
+      "4-2": 9728.0,
+      "4-3": 16854.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 11.278,
+    "final_positions": {
+      "HYDROGEL_PACK": 13,
+      "VELVETFRUIT_EXTRACT": 8,
+      "VEV_4000": 14
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-08-30.log",
+    "max_drawdown": 1815.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14153.0,
+        "VELVETFRUIT_EXTRACT": 1457.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4535.0,
+        "VELVETFRUIT_EXTRACT": 2886.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11727.0,
+        "VELVETFRUIT_EXTRACT": 2448.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 45108.0,
+    "trade_count": 2300,
+    "traderdata_max_size": null,
+    "variant": "PRESET_core_plus_deep_vev",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_core_plus_deep_vev.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_core_plus_atm_vev.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 18536.0,
+      "4-2": 9870.0,
+      "4-3": 16788.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 11.774,
+    "final_positions": {
+      "HYDROGEL_PACK": 13,
+      "VELVETFRUIT_EXTRACT": 8,
+      "VEV_4000": 14,
+      "VEV_5200": 1,
+      "VEV_5300": 25
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-08-43.log",
+    "max_drawdown": 1813.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14153.0,
+        "VELVETFRUIT_EXTRACT": 1457.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": -16.0,
+        "VEV_5300": 25.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4535.0,
+        "VELVETFRUIT_EXTRACT": 2886.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 28.0,
+        "VEV_5300": 114.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11727.0,
+        "VELVETFRUIT_EXTRACT": 2448.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": -21.0,
+        "VEV_5300": -45.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 45194.0,
+    "trade_count": 2330,
+    "traderdata_max_size": null,
+    "variant": "PRESET_core_plus_atm_vev",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_core_plus_atm_vev.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_full_static_ladder.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 18574.0,
+      "4-2": 10070.0,
+      "4-3": 16788.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 15.127,
+    "final_positions": {
+      "HYDROGEL_PACK": 13,
+      "VELVETFRUIT_EXTRACT": 8,
+      "VEV_4000": 14,
+      "VEV_5000": 2,
+      "VEV_5100": 2,
+      "VEV_5200": 2,
+      "VEV_5300": 30,
+      "VEV_5400": 20,
+      "VEV_5500": 5,
+      "VEV_6000": 60,
+      "VEV_6500": 60
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-08-55.log",
+    "max_drawdown": 1811.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14153.0,
+        "VELVETFRUIT_EXTRACT": 1457.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": -16.0,
+        "VEV_5300": 43.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4535.0,
+        "VELVETFRUIT_EXTRACT": 2886.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 56.0,
+        "VEV_5300": 228.0,
+        "VEV_5400": 38.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11727.0,
+        "VELVETFRUIT_EXTRACT": 2448.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 8.0,
+        "VEV_5100": 5.0,
+        "VEV_5200": -27.0,
+        "VEV_5300": -84.0,
+        "VEV_5400": 6.0,
+        "VEV_5500": 6.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 45432.0,
+    "trade_count": 2407,
+    "traderdata_max_size": null,
+    "variant": "PRESET_full_static_ladder",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_full_static_ladder.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_conservative_core.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 17490.0,
+      "4-2": 8294.0,
+      "4-3": 16110.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 10.907,
+    "final_positions": {
+      "HYDROGEL_PACK": 14,
+      "VELVETFRUIT_EXTRACT": 4,
+      "VEV_4000": 15
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-09-11.log",
+    "max_drawdown": 1812.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 13579.0,
+        "VELVETFRUIT_EXTRACT": 1214.0,
+        "VEV_4000": 2698.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4065.0,
+        "VELVETFRUIT_EXTRACT": 2068.0,
+        "VEV_4000": 2160.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11653.0,
+        "VELVETFRUIT_EXTRACT": 2020.0,
+        "VEV_4000": 2437.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 41894.0,
+    "trade_count": 2281,
+    "traderdata_max_size": null,
+    "variant": "PRESET_conservative_core",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_conservative_core.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_aggressive_core.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 18558.0,
+      "4-2": 10205.0,
+      "4-3": 17099.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 10.792,
+    "final_positions": {
+      "HYDROGEL_PACK": 16,
+      "VELVETFRUIT_EXTRACT": 6,
+      "VEV_4000": 14
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-09-23.log",
+    "max_drawdown": 1857.5,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14318.0,
+        "VELVETFRUIT_EXTRACT": 1323.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4748.0,
+        "VELVETFRUIT_EXTRACT": 3149.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11714.0,
+        "VELVETFRUIT_EXTRACT": 2706.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 0.0,
+        "VEV_5300": 0.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 0.0,
+        "VEV_6500": 0.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 45862.0,
+    "trade_count": 2347,
+    "traderdata_max_size": null,
+    "variant": "PRESET_aggressive_core",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_aggressive_core.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_no_small_vevs.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 18574.0,
+      "4-2": 10032.0,
+      "4-3": 16763.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 13.522,
+    "final_positions": {
+      "HYDROGEL_PACK": 13,
+      "VELVETFRUIT_EXTRACT": 8,
+      "VEV_4000": 14,
+      "VEV_5200": 2,
+      "VEV_5300": 30,
+      "VEV_6000": 60,
+      "VEV_6500": 60
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-09-35.log",
+    "max_drawdown": 1811.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14153.0,
+        "VELVETFRUIT_EXTRACT": 1457.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": -16.0,
+        "VEV_5300": 43.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4535.0,
+        "VELVETFRUIT_EXTRACT": 2886.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 56.0,
+        "VEV_5300": 228.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11727.0,
+        "VELVETFRUIT_EXTRACT": 2448.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": -27.0,
+        "VEV_5300": -84.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 45369.0,
+    "trade_count": 2380,
+    "traderdata_max_size": null,
+    "variant": "PRESET_no_small_vevs",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_no_small_vevs.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_no_velvet_standalone.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 17117.0,
+      "4-2": 7185.0,
+      "4-3": 14340.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 15.572,
+    "final_positions": {
+      "HYDROGEL_PACK": 13,
+      "VEV_4000": 14,
+      "VEV_5000": 2,
+      "VEV_5100": 2,
+      "VEV_5200": 2,
+      "VEV_5300": 30,
+      "VEV_5400": 20,
+      "VEV_5500": 5,
+      "VEV_6000": 60,
+      "VEV_6500": 60
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-09-50.log",
+    "max_drawdown": 1742.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14153.0,
+        "VELVETFRUIT_EXTRACT": 0.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": -16.0,
+        "VEV_5300": 43.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4535.0,
+        "VELVETFRUIT_EXTRACT": 0.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 56.0,
+        "VEV_5300": 228.0,
+        "VEV_5400": 38.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11727.0,
+        "VELVETFRUIT_EXTRACT": 0.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 8.0,
+        "VEV_5100": 5.0,
+        "VEV_5200": -27.0,
+        "VEV_5300": -84.0,
+        "VEV_5400": 6.0,
+        "VEV_5500": 6.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 38642.0,
+    "trade_count": 1348,
+    "traderdata_max_size": null,
+    "variant": "PRESET_no_velvet_standalone",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_no_velvet_standalone.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_vev_ladder_only.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 2964.0,
+      "4-2": 2650.0,
+      "4-3": 2613.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 14.809,
+    "final_positions": {
+      "VEV_4000": 14,
+      "VEV_5000": 2,
+      "VEV_5100": 2,
+      "VEV_5200": 2,
+      "VEV_5300": 30,
+      "VEV_5400": 20,
+      "VEV_5500": 5,
+      "VEV_6000": 60,
+      "VEV_6500": 60
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-10-06.log",
+    "max_drawdown": 919.5,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 0.0,
+        "VELVETFRUIT_EXTRACT": 0.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": -16.0,
+        "VEV_5300": 43.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 0.0,
+        "VELVETFRUIT_EXTRACT": 0.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 56.0,
+        "VEV_5300": 228.0,
+        "VEV_5400": 38.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 0.0,
+        "VELVETFRUIT_EXTRACT": 0.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 8.0,
+        "VEV_5100": 5.0,
+        "VEV_5200": -27.0,
+        "VEV_5300": -84.0,
+        "VEV_5400": 6.0,
+        "VEV_5500": 6.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 8227.0,
+    "trade_count": 531,
+    "traderdata_max_size": null,
+    "variant": "PRESET_vev_ladder_only",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_vev_ladder_only.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_aggressive_hydro.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 18931.0,
+      "4-2": 10634.0,
+      "4-3": 17012.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 15.178,
+    "final_positions": {
+      "HYDROGEL_PACK": 16,
+      "VELVETFRUIT_EXTRACT": 8,
+      "VEV_4000": 14,
+      "VEV_5000": 2,
+      "VEV_5100": 2,
+      "VEV_5200": 2,
+      "VEV_5300": 30,
+      "VEV_5400": 20,
+      "VEV_5500": 5,
+      "VEV_6000": 60,
+      "VEV_6500": 60
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-10-22.log",
+    "max_drawdown": 1811.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14510.0,
+        "VELVETFRUIT_EXTRACT": 1457.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": -16.0,
+        "VEV_5300": 43.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 5099.0,
+        "VELVETFRUIT_EXTRACT": 2886.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 56.0,
+        "VEV_5300": 228.0,
+        "VEV_5400": 38.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11951.0,
+        "VELVETFRUIT_EXTRACT": 2448.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 8.0,
+        "VEV_5100": 5.0,
+        "VEV_5200": -27.0,
+        "VEV_5300": -84.0,
+        "VEV_5400": 6.0,
+        "VEV_5500": 6.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 46577.0,
+    "trade_count": 2413,
+    "traderdata_max_size": null,
+    "variant": "PRESET_aggressive_hydro",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_aggressive_hydro.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_aggressive_vev4000.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 18574.0,
+      "4-2": 10070.0,
+      "4-3": 16788.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 15.11,
+    "final_positions": {
+      "HYDROGEL_PACK": 13,
+      "VELVETFRUIT_EXTRACT": 8,
+      "VEV_4000": 14,
+      "VEV_5000": 2,
+      "VEV_5100": 2,
+      "VEV_5200": 2,
+      "VEV_5300": 30,
+      "VEV_5400": 20,
+      "VEV_5500": 5,
+      "VEV_6000": 60,
+      "VEV_6500": 60
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-10-38.log",
+    "max_drawdown": 1811.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14153.0,
+        "VELVETFRUIT_EXTRACT": 1457.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": -16.0,
+        "VEV_5300": 43.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4535.0,
+        "VELVETFRUIT_EXTRACT": 2886.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 56.0,
+        "VEV_5300": 228.0,
+        "VEV_5400": 38.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11727.0,
+        "VELVETFRUIT_EXTRACT": 2448.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 8.0,
+        "VEV_5100": 5.0,
+        "VEV_5200": -27.0,
+        "VEV_5300": -84.0,
+        "VEV_5400": 6.0,
+        "VEV_5500": 6.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 45432.0,
+    "trade_count": 2407,
+    "traderdata_max_size": null,
+    "variant": "PRESET_aggressive_vev4000",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_aggressive_vev4000.py"
+  },
+  {
+    "command": "C:\\Program Files\\Python311\\python.exe C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\run_bt.py C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_velvet_profit_engine.py 4-1 4-2 4-3",
+    "day_totals": {
+      "4-1": 18466.0,
+      "4-2": 10476.0,
+      "4-3": 17068.0
+    },
+    "days": [
+      "4-1",
+      "4-2",
+      "4-3"
+    ],
+    "elapsed_sec": 15.024,
+    "final_positions": {
+      "HYDROGEL_PACK": 13,
+      "VELVETFRUIT_EXTRACT": 3,
+      "VEV_4000": 14,
+      "VEV_5000": 2,
+      "VEV_5100": 2,
+      "VEV_5200": 2,
+      "VEV_5300": 30,
+      "VEV_5400": 20,
+      "VEV_5500": 5,
+      "VEV_6000": 60,
+      "VEV_6500": 60
+    },
+    "log_path": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\backtests\\2026-04-28_02-10-54.log",
+    "max_drawdown": 1825.0,
+    "notes": "",
+    "product_pnl_by_day": {
+      "4-1": {
+        "HYDROGEL_PACK": 14153.0,
+        "VELVETFRUIT_EXTRACT": 1349.0,
+        "VEV_4000": 2916.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": -16.0,
+        "VEV_5300": 43.0,
+        "VEV_5400": 0.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-2": {
+        "HYDROGEL_PACK": 4535.0,
+        "VELVETFRUIT_EXTRACT": 3292.0,
+        "VEV_4000": 2308.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 0.0,
+        "VEV_5100": 0.0,
+        "VEV_5200": 56.0,
+        "VEV_5300": 228.0,
+        "VEV_5400": 38.0,
+        "VEV_5500": 0.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      },
+      "4-3": {
+        "HYDROGEL_PACK": 11727.0,
+        "VELVETFRUIT_EXTRACT": 2728.0,
+        "VEV_4000": 2679.0,
+        "VEV_4500": 0.0,
+        "VEV_5000": 8.0,
+        "VEV_5100": 5.0,
+        "VEV_5200": -27.0,
+        "VEV_5300": -84.0,
+        "VEV_5400": 6.0,
+        "VEV_5500": 6.0,
+        "VEV_6000": 10.0,
+        "VEV_6500": 10.0
+      }
+    },
+    "returncode": 0,
+    "total_pnl": 46010.0,
+    "trade_count": 2436,
+    "traderdata_max_size": null,
+    "variant": "PRESET_velvet_profit_engine",
+    "variant_file": "C:\\Users\\ATM Rahat Hossain\\Desktop\\IMC-Prosperity-Challenge\\ROUND4\\.dist\\ablation\\PRESET_velvet_profit_engine.py"
+  }
+]

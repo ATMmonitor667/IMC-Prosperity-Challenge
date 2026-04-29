@@ -21,22 +21,52 @@ from datamodel import Order, OrderDepth, Trade, TradingState
 
 
 # =========================================================================== #
-# Feature flags                                                                #
+# Feature flags and strategy preset                                            #
 # =========================================================================== #
 
-ENABLE_VEV_LADDER = True
-ENABLE_DELTA_CONTROL = False
-ENABLE_FLOW = False
-ENABLE_RESIDUAL_Z = True
-ENABLE_MR = True
-ENABLE_CHEAP_VEV_RULE = True
-ENABLE_ENDGAME = True
-ENABLE_ADVERSE_SELECTION_FILTER = False
-ENABLE_DYNAMIC_EDGES = True
-ENABLE_VELVET_HEDGE_PRESSURE = False
+# Strategy lab selector. `minrisk_live` is the default for unseen/actual data.
+STRATEGY_PRESET = "minrisk_live"
+S_HAT_PROFILE = "balanced"
+PRESET_OVERRIDES: Dict[str, Any] = {}
+
+# Core architecture.
+ENABLE_CORE_STATIC_MAKER = True
 ENABLE_TAKER = False
 ENABLE_MAKER = True
+ENABLE_VEV_LADDER = True
+
+# Product engines.
+ENABLE_HYDRO_ENGINE = True
+ENABLE_VELVET_ENGINE = True
+ENABLE_VEV4000_ENGINE = True
+ENABLE_VEV4500_ENGINE = True
+ENABLE_ATM_VEV_ENGINE = True
+ENABLE_CHEAP_VEV_ENGINE = True
+ENABLE_WING_ENGINE = True
+
+# Fair-value systems.
+ENABLE_S_HAT = True
+ENABLE_TV_FAIR = True
 ENABLE_MONOTONIC_VEV_FAIR = True
+ENABLE_RESIDUAL_Z = True
+ENABLE_RESID_SIDE_GATE = True
+ENABLE_VERTICAL_SANITY = True
+
+# Risk / execution.
+ENABLE_DYNAMIC_EDGES = True
+ENABLE_MR = True
+ENABLE_ENDGAME = True
+ENABLE_CHEAP_VEV_RULE = True
+ENABLE_RESERVATION_BOOK = True
+
+# Optional / usually off.
+ENABLE_EMERGENCY_REDUCE_TAKER = False
+ENABLE_SECOND_LEVEL_QUOTES = False
+ENABLE_DELTA_CONTROL = False
+ENABLE_FLOW = False
+ENABLE_ADVERSE_SELECTION_FILTER = False
+ENABLE_VELVET_HEDGE_PRESSURE = False
+ENABLE_VERTICAL_TILT = False
 
 # Explicitly keep the failed adaptive-maker machinery disabled. These switches
 # are intentionally inert in this static bot if no corresponding code exists.
@@ -45,6 +75,7 @@ ENABLE_ADAPTIVE_MARKOUT = False
 ENABLE_ADAPTIVE_CONFIDENCE = False
 ENABLE_ADAPTIVE_STATE_MACHINE = False
 ENABLE_STRIP_BALANCE = False
+ENABLE_TARGET_INVENTORY = False
 
 # Test switches; None means trade every listed product.
 ACTIVE_PRODUCTS = None
@@ -267,7 +298,7 @@ VELVET_SIZE = 4
 DEEP_VEV_SIZE = 2
 ATM_VEV_SIZE = 2
 CHEAP_VEV_SIZE = 1
-WING_BID_SIZE = 2
+WING_BID_SIZE = 1
 WING_UNWIND_SIZE = 4
 SIZE_BY_PRODUCT: Dict[str, int] = {
     "HYDROGEL_PACK": 6,
@@ -344,6 +375,386 @@ ENDGAME_START = 990_000
 TV_SPREAD_FLOOR = 6.0
 TV_SPREAD_MULT = 4.0
 
+# Unseen-day robustness guards. These are deliberately simple and static:
+# they do not learn markouts or mutate strategy state, but they prevent the
+# bot from adding risk when the book/fair inputs look less reliable than the
+# calibration days.
+ENABLE_UNSEEN_DAY_GUARDS = True
+ROBUST_INV_SOFT_RATIO = 0.62
+ROBUST_INV_HARD_RATIO = 0.82
+ROBUST_WIDE_SPREAD_EDGE_MULT = 0.55
+ROBUST_WIDE_SPREAD_EDGE_CAP = 5.0
+ROBUST_WARMUP_EXTRA_TICKS = 140
+ROBUST_WARMUP_EDGE_ADD = 0.75
+ROBUST_SHAT_DISPERSION_START = 10.0
+ROBUST_SHAT_DISPERSION_HARD = 18.0
+ROBUST_SHAT_DISPERSION_EDGE_MULT = 0.35
+ROBUST_SHAT_DISPERSION_EDGE_CAP = 4.0
+ROBUST_CORE_PRODUCTS = {"HYDROGEL_PACK", "VELVETFRUIT_EXTRACT", "VEV_4000"}
+ROBUST_SPREAD_CAP_BY_PRODUCT: Dict[str, int] = {
+    "HYDROGEL_PACK": 8,
+    "VELVETFRUIT_EXTRACT": 8,
+    "VEV_4000": 10,
+    "VEV_4500": 10,
+    "VEV_5200": 8,
+    "VEV_5300": 8,
+    "VEV_6000": 2,
+    "VEV_6500": 2,
+}
+
+
+# =========================================================================== #
+# Strategy presets                                                             #
+# =========================================================================== #
+
+S_HAT_PROFILES: Dict[str, Dict[str, float]] = {
+    "balanced": {"velvet": 4.0, "vev4000": 2.0, "vev4500": 2.0, "vev5000": 1.0},
+    "no_5000": {"velvet": 4.0, "vev4000": 2.0, "vev4500": 2.0, "vev5000": 0.0},
+    "deep_itm": {"velvet": 3.0, "vev4000": 3.0, "vev4500": 3.0, "vev5000": 0.0},
+    "velvet_heavy": {"velvet": 6.0, "vev4000": 1.0, "vev4500": 1.0, "vev5000": 0.0},
+}
+
+ALL_PRODUCTS_SET = set(LIMITS)
+CORE_THREE = {"HYDROGEL_PACK", "VELVETFRUIT_EXTRACT", "VEV_4000"}
+DEEP_CORE = CORE_THREE | {"VEV_4500"}
+ATM_SELECTIVE = CORE_THREE | {"VEV_5200", "VEV_5300"}
+NO_SMALL_VEVS = ALL_PRODUCTS_SET - {"VEV_5000", "VEV_5100", "VEV_5400", "VEV_5500"}
+VEV_LADDER_PRODUCTS = {p for p in ALL_PRODUCTS_SET if p.startswith("VEV_")}
+
+
+def _copy_nested_bool(src: Dict[str, Dict[str, bool]]) -> Dict[str, Dict[str, bool]]:
+    return {k: dict(v) for k, v in src.items()}
+
+
+def _copy_float_table(src: Dict[str, float]) -> Dict[str, float]:
+    return {k: float(v) for k, v in src.items()}
+
+
+def _copy_int_table(src: Dict[str, int]) -> Dict[str, int]:
+    return {k: int(v) for k, v in src.items()}
+
+
+def _copy_str_table(src: Dict[str, str]) -> Dict[str, str]:
+    return {k: str(v) for k, v in src.items()}
+
+
+def _current_best_config() -> Dict[str, Any]:
+    return {
+        "active_products": None,
+        "active_sides": _copy_nested_bool(ACTIVE_SIDES),
+        "side_edge_adj": {k: dict(v) for k, v in SIDE_EDGE_ADJ.items()},
+        "sizes": _copy_int_table(SIZE_BY_PRODUCT),
+        "maker_edges": _copy_float_table(MAKE_EDGE_MULT_BY_PRODUCT),
+        "quote_styles": _copy_str_table(QUOTE_STYLE_BY_PRODUCT),
+        "s_hat_profile": "balanced",
+        "tv_mode": "hybrid_70_30",
+        "resid": {
+            "side_gate": True,
+            "side_threshold": 0.75,
+            "opposite_edge_add": 1.0,
+            "hard_threshold": 999.0,
+        },
+        "vertical": {
+            "enabled": True,
+            "edge_adj": 0.50,
+            "signal_threshold": 2.0,
+        },
+        "mr": {
+            "hydro_entry_z": HYDRO_MR_ENTRY_Z,
+            "hydro_pull": HYDRO_MR_PULL,
+            "velvet_entry_z": VELVET_MR_ENTRY_Z,
+            "velvet_pull": VELVET_MR_PULL,
+        },
+        "flags": {
+            "ENABLE_HYDRO_ENGINE": True,
+            "ENABLE_VELVET_ENGINE": True,
+            "ENABLE_VEV4000_ENGINE": True,
+            "ENABLE_VEV4500_ENGINE": True,
+            "ENABLE_ATM_VEV_ENGINE": True,
+            "ENABLE_CHEAP_VEV_ENGINE": True,
+            "ENABLE_WING_ENGINE": True,
+            "ENABLE_EMERGENCY_REDUCE_TAKER": False,
+            "ENABLE_INVENTORY_REDUCING_TAKER": False,
+        },
+    }
+
+
+def _copy_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(cfg)
+    out["active_products"] = None if cfg.get("active_products") is None else set(cfg["active_products"])
+    out["active_sides"] = _copy_nested_bool(cfg["active_sides"])
+    out["side_edge_adj"] = {k: dict(v) for k, v in cfg["side_edge_adj"].items()}
+    out["sizes"] = _copy_int_table(cfg["sizes"])
+    out["maker_edges"] = _copy_float_table(cfg["maker_edges"])
+    out["quote_styles"] = _copy_str_table(cfg["quote_styles"])
+    out["resid"] = dict(cfg["resid"])
+    out["vertical"] = dict(cfg["vertical"])
+    out["mr"] = dict(cfg["mr"])
+    out["flags"] = dict(cfg["flags"])
+    return out
+
+
+def _preset_with(base: Dict[str, Any], **updates: Any) -> Dict[str, Any]:
+    cfg = _copy_config(base)
+    for key, value in updates.items():
+        if key == "active_products":
+            cfg[key] = None if value is None else set(value)
+        elif key in {"sizes", "maker_edges", "quote_styles", "resid", "vertical", "mr", "flags"}:
+            cfg[key].update(value)
+        elif key in {"active_sides", "side_edge_adj"}:
+            for product, sides in value.items():
+                cfg[key].setdefault(product, {}).update(sides)
+        else:
+            cfg[key] = value
+    return cfg
+
+
+def strategy_presets() -> Dict[str, Dict[str, Any]]:
+    base = _current_best_config()
+    presets = {
+        "minrisk_live": _preset_with(
+            base,
+            active_products={"HYDROGEL_PACK", "VELVETFRUIT_EXTRACT"},
+            sizes={
+                "HYDROGEL_PACK": 3,
+                "VELVETFRUIT_EXTRACT": 2,
+            },
+            maker_edges={
+                "HYDROGEL_PACK": 0.90,
+                "VELVETFRUIT_EXTRACT": 1.20,
+                "VEV_4000": 999.0,
+                "VEV_4500": 999.0,
+                "VEV_5000": 999.0,
+                "VEV_5100": 999.0,
+                "VEV_5200": 999.0,
+                "VEV_5300": 999.0,
+                "VEV_5400": 999.0,
+                "VEV_5500": 999.0,
+                "VEV_6000": 999.0,
+                "VEV_6500": 999.0,
+            },
+            quote_styles={
+                "HYDROGEL_PACK": "hybrid",
+                "VELVETFRUIT_EXTRACT": "hybrid",
+            },
+            mr={
+                "hydro_entry_z": 1.75,
+                "hydro_pull": 0.08,
+                "velvet_entry_z": 2.25,
+                "velvet_pull": 0.02,
+            },
+            flags={
+                "ENABLE_S_HAT": False,
+                "ENABLE_TV_FAIR": False,
+                "ENABLE_VEV_LADDER": False,
+                "ENABLE_HYDRO_ENGINE": True,
+                "ENABLE_VELVET_ENGINE": True,
+                "ENABLE_VEV4000_ENGINE": False,
+                "ENABLE_VEV4500_ENGINE": False,
+                "ENABLE_ATM_VEV_ENGINE": False,
+                "ENABLE_CHEAP_VEV_ENGINE": False,
+                "ENABLE_WING_ENGINE": False,
+                "ENABLE_RESIDUAL_Z": False,
+                "ENABLE_RESID_SIDE_GATE": False,
+                "ENABLE_VERTICAL_SANITY": False,
+                "ENABLE_EMERGENCY_REDUCE_TAKER": False,
+                "ENABLE_INVENTORY_REDUCING_TAKER": False,
+            },
+        ),
+        "robust_live": _preset_with(
+            base,
+            active_products={
+                "HYDROGEL_PACK",
+                "VELVETFRUIT_EXTRACT",
+                "VEV_4000",
+                "VEV_4500",
+                "VEV_5200",
+                "VEV_5300",
+                "VEV_6000",
+                "VEV_6500",
+            },
+            sizes={
+                "HYDROGEL_PACK": 5,
+                "VELVETFRUIT_EXTRACT": 3,
+                "VEV_4000": 2,
+                "VEV_4500": 1,
+                "VEV_5200": 1,
+                "VEV_5300": 1,
+                "VEV_6000": 1,
+                "VEV_6500": 1,
+            },
+            maker_edges={
+                "HYDROGEL_PACK": 0.70,
+                "VELVETFRUIT_EXTRACT": 0.90,
+                "VEV_4000": 0.75,
+                "VEV_4500": 0.90,
+                "VEV_5000": 999.0,
+                "VEV_5100": 999.0,
+                "VEV_5200": 1.20,
+                "VEV_5300": 1.20,
+                "VEV_5400": 999.0,
+                "VEV_5500": 999.0,
+                "VEV_6000": 999.0,
+                "VEV_6500": 999.0,
+            },
+            quote_styles={
+                "HYDROGEL_PACK": "hybrid",
+                "VELVETFRUIT_EXTRACT": "hybrid",
+                "VEV_4000": "hybrid",
+                "VEV_4500": "hybrid",
+                "VEV_5200": "hybrid",
+                "VEV_5300": "hybrid",
+            },
+            s_hat_profile="no_5000",
+            tv_mode="hybrid_70_30",
+            resid={
+                "side_gate": True,
+                "side_threshold": 0.50,
+                "opposite_edge_add": 1.50,
+                "hard_threshold": 2.75,
+            },
+            vertical={"enabled": True, "edge_adj": 0.25, "signal_threshold": 2.50},
+            mr={
+                "hydro_entry_z": 1.40,
+                "hydro_pull": 0.10,
+                "velvet_entry_z": 2.00,
+                "velvet_pull": 0.03,
+            },
+            flags={
+                "ENABLE_HYDRO_ENGINE": True,
+                "ENABLE_VELVET_ENGINE": True,
+                "ENABLE_VEV4000_ENGINE": True,
+                "ENABLE_VEV4500_ENGINE": True,
+                "ENABLE_ATM_VEV_ENGINE": True,
+                "ENABLE_CHEAP_VEV_ENGINE": False,
+                "ENABLE_WING_ENGINE": True,
+                "ENABLE_EMERGENCY_REDUCE_TAKER": False,
+                "ENABLE_INVENTORY_REDUCING_TAKER": False,
+            },
+        ),
+        "current_best": base,
+        "full_static_ladder": _copy_config(base),
+        "core_three_only": _preset_with(
+            base,
+            active_products=CORE_THREE,
+            sizes={"HYDROGEL_PACK": 7, "VELVETFRUIT_EXTRACT": 5, "VEV_4000": 4},
+            maker_edges={"HYDROGEL_PACK": 0.55, "VELVETFRUIT_EXTRACT": 0.65, "VEV_4000": 0.50},
+        ),
+        "hydro_only": _preset_with(base, active_products={"HYDROGEL_PACK"}),
+        "velvet_only": _preset_with(base, active_products={"VELVETFRUIT_EXTRACT"}),
+        "vev4000_only": _preset_with(base, active_products={"VEV_4000"}),
+        "hydro_velvet_vev4000": _preset_with(base, active_products=CORE_THREE),
+        "core_plus_deep_vev": _preset_with(
+            base,
+            active_products=DEEP_CORE,
+            sizes={"VEV_4500": 2},
+            maker_edges={"VEV_4500": 0.55},
+        ),
+        "core_plus_atm_vev": _preset_with(
+            base,
+            active_products=ATM_SELECTIVE,
+            sizes={"VEV_5200": 1, "VEV_5300": 1},
+            maker_edges={"VEV_5200": 0.85, "VEV_5300": 0.85},
+        ),
+        "conservative_core": _preset_with(
+            base,
+            active_products=CORE_THREE,
+            sizes={"HYDROGEL_PACK": 5, "VELVETFRUIT_EXTRACT": 3, "VEV_4000": 2},
+            maker_edges={"HYDROGEL_PACK": 0.70, "VELVETFRUIT_EXTRACT": 0.85, "VEV_4000": 0.70},
+        ),
+        "aggressive_core": _preset_with(
+            base,
+            active_products=CORE_THREE,
+            sizes={"HYDROGEL_PACK": 8, "VELVETFRUIT_EXTRACT": 6, "VEV_4000": 5},
+            maker_edges={"HYDROGEL_PACK": 0.50, "VELVETFRUIT_EXTRACT": 0.60, "VEV_4000": 0.45},
+        ),
+        "no_small_vevs": _preset_with(base, active_products=NO_SMALL_VEVS),
+        "no_velvet_standalone": _preset_with(base, active_products=ALL_PRODUCTS_SET - {"VELVETFRUIT_EXTRACT"}),
+        "vev_ladder_only": _preset_with(base, active_products=VEV_LADDER_PRODUCTS),
+        "aggressive_hydro": _preset_with(
+            base,
+            sizes={"HYDROGEL_PACK": 7},
+            maker_edges={"HYDROGEL_PACK": 0.55},
+            mr={"hydro_entry_z": 1.15, "hydro_pull": 0.14},
+        ),
+        "aggressive_vev4000": _preset_with(
+            base,
+            sizes={"VEV_4000": 4},
+            maker_edges={"VEV_4000": 0.50},
+        ),
+        "velvet_profit_engine": _preset_with(
+            base,
+            sizes={"VELVETFRUIT_EXTRACT": 5},
+            maker_edges={"VELVETFRUIT_EXTRACT": 0.65},
+            mr={"velvet_entry_z": 1.75, "velvet_pull": 0.05},
+        ),
+    }
+    return presets
+
+
+def _apply_overrides(cfg: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+    if not overrides:
+        return cfg
+    return _preset_with(cfg, **overrides)
+
+
+def apply_strategy_preset() -> None:
+    global ACTIVE_PRODUCTS, ACTIVE_SIDES, SIDE_EDGE_ADJ, SIZE_BY_PRODUCT, MAKE_EDGE_MULT_BY_PRODUCT
+    global QUOTE_STYLE_BY_PRODUCT, TV_MODE, S_HAT_PROFILE
+    global S_WEIGHT_VELVET, S_WEIGHT_VEV4000, S_WEIGHT_VEV4500, S_WEIGHT_VEV5000
+    global RESID_SIDE_GATE, RESID_SIDE_THRESHOLD, RESID_OPPOSITE_EDGE_ADD, RESID_HARD_THRESHOLD
+    global ENABLE_RESID_SIDE_GATE, ENABLE_VERTICAL_SANITY, VERTICAL_EDGE_ADJ, VERTICAL_SIGNAL_THRESHOLD
+    global HYDRO_MR_ENTRY_Z, HYDRO_MR_PULL, VELVET_MR_ENTRY_Z, VELVET_MR_PULL
+    global ENABLE_EMERGENCY_REDUCE_TAKER, ENABLE_INVENTORY_REDUCING_TAKER
+
+    presets = strategy_presets()
+    if STRATEGY_PRESET not in presets:
+        raise ValueError(f"unknown STRATEGY_PRESET: {STRATEGY_PRESET}")
+    cfg = _apply_overrides(_copy_config(presets[STRATEGY_PRESET]), PRESET_OVERRIDES)
+
+    ACTIVE_PRODUCTS = None if cfg["active_products"] is None else set(cfg["active_products"])
+    ACTIVE_SIDES = _copy_nested_bool(cfg["active_sides"])
+    SIDE_EDGE_ADJ = {k: dict(v) for k, v in cfg["side_edge_adj"].items()}
+    SIZE_BY_PRODUCT = _copy_int_table(cfg["sizes"])
+    MAKE_EDGE_MULT_BY_PRODUCT = _copy_float_table(cfg["maker_edges"])
+    QUOTE_STYLE_BY_PRODUCT = _copy_str_table(cfg["quote_styles"])
+
+    TV_MODE = str(cfg.get("tv_mode", TV_MODE))
+    S_HAT_PROFILE = str(cfg.get("s_hat_profile", S_HAT_PROFILE))
+    weights = S_HAT_PROFILES.get(S_HAT_PROFILE, S_HAT_PROFILES["balanced"])
+    S_WEIGHT_VELVET = float(weights["velvet"])
+    S_WEIGHT_VEV4000 = float(weights["vev4000"])
+    S_WEIGHT_VEV4500 = float(weights["vev4500"])
+    S_WEIGHT_VEV5000 = float(weights["vev5000"])
+
+    resid = cfg["resid"]
+    RESID_SIDE_GATE = bool(resid.get("side_gate", RESID_SIDE_GATE))
+    ENABLE_RESID_SIDE_GATE = RESID_SIDE_GATE
+    RESID_SIDE_THRESHOLD = float(resid.get("side_threshold", RESID_SIDE_THRESHOLD))
+    RESID_OPPOSITE_EDGE_ADD = float(resid.get("opposite_edge_add", RESID_OPPOSITE_EDGE_ADD))
+    RESID_HARD_THRESHOLD = float(resid.get("hard_threshold", RESID_HARD_THRESHOLD))
+
+    vertical = cfg["vertical"]
+    ENABLE_VERTICAL_SANITY = bool(vertical.get("enabled", ENABLE_VERTICAL_SANITY))
+    VERTICAL_EDGE_ADJ = float(vertical.get("edge_adj", VERTICAL_EDGE_ADJ))
+    VERTICAL_SIGNAL_THRESHOLD = float(vertical.get("signal_threshold", VERTICAL_SIGNAL_THRESHOLD))
+
+    mr = cfg["mr"]
+    HYDRO_MR_ENTRY_Z = float(mr.get("hydro_entry_z", HYDRO_MR_ENTRY_Z))
+    HYDRO_MR_PULL = float(mr.get("hydro_pull", HYDRO_MR_PULL))
+    VELVET_MR_ENTRY_Z = float(mr.get("velvet_entry_z", VELVET_MR_ENTRY_Z))
+    VELVET_MR_PULL = float(mr.get("velvet_pull", VELVET_MR_PULL))
+
+    for flag, value in cfg.get("flags", {}).items():
+        globals()[flag] = bool(value)
+    if "ENABLE_EMERGENCY_REDUCE_TAKER" in cfg.get("flags", {}):
+        ENABLE_INVENTORY_REDUCING_TAKER = ENABLE_EMERGENCY_REDUCE_TAKER
+    elif "ENABLE_INVENTORY_REDUCING_TAKER" in cfg.get("flags", {}):
+        ENABLE_EMERGENCY_REDUCE_TAKER = ENABLE_INVENTORY_REDUCING_TAKER
+
+
+apply_strategy_preset()
+
 
 # =========================================================================== #
 # Helpers                                                                      #
@@ -399,11 +810,35 @@ def update_ewma(prev: Optional[float], x: float, alpha: float) -> float:
 
 
 def active_product(product: str) -> bool:
+    if not ENABLE_CORE_STATIC_MAKER:
+        return False
+    if not product_engine_enabled(product):
+        return False
     return ACTIVE_PRODUCTS is None or product in ACTIVE_PRODUCTS
+
+
+def product_engine_enabled(product: str) -> bool:
+    if product == "HYDROGEL_PACK":
+        return ENABLE_HYDRO_ENGINE
+    if product == "VELVETFRUIT_EXTRACT":
+        return ENABLE_VELVET_ENGINE
+    if product == "VEV_4000":
+        return ENABLE_VEV4000_ENGINE
+    if product == "VEV_4500":
+        return ENABLE_VEV4500_ENGINE
+    if product in NEAR_ATM:
+        return ENABLE_ATM_VEV_ENGINE
+    if product in CHEAP_VEVS_NON_WING:
+        return ENABLE_CHEAP_VEV_ENGINE
+    if product in WINGS:
+        return ENABLE_WING_ENGINE
+    return True
 
 
 def tv_value(K: int, tv: Dict[str, float]) -> float:
     seed = float(TV_SEED[K])
+    if not ENABLE_TV_FAIR:
+        return seed
     ema = float(tv.get(str(K), seed))
     mode = str(TV_MODE).lower()
     if mode == "fixed":
@@ -687,6 +1122,41 @@ def estimate_s_hat(
     return s / w_tot if w_tot > 0 else prelim
 
 
+def estimate_s_hat_dispersion(
+    mids: Dict[str, float],
+    tv: Dict[str, float],
+    s_hat: Optional[float],
+) -> float:
+    """Anchor disagreement in underlying ticks; high values mean VEV fairs are less safe."""
+    if s_hat is None:
+        return ROBUST_SHAT_DISPERSION_HARD
+    anchors: List[float] = []
+    velvet = mids.get("VELVETFRUIT_EXTRACT")
+    if velvet is not None:
+        anchors.append(float(velvet))
+    if "VEV_4000" in mids:
+        anchors.append(float(mids["VEV_4000"]) + 4000.0)
+    if "VEV_4500" in mids:
+        anchors.append(float(mids["VEV_4500"]) + 4500.0)
+    if "VEV_5000" in mids:
+        anchors.append(float(mids["VEV_5000"]) + 5000.0 - tv_value(5000, tv))
+    if len(anchors) < 2:
+        return 0.0
+    return max(abs(a - float(s_hat)) for a in anchors)
+
+
+def robust_edge_add(product: str, spread: float, ticks: int) -> float:
+    if not ENABLE_UNSEEN_DAY_GUARDS:
+        return 0.0
+    edge = 0.0
+    cap = float(ROBUST_SPREAD_CAP_BY_PRODUCT.get(product, 8))
+    if spread > cap:
+        edge += min(ROBUST_WIDE_SPREAD_EDGE_CAP, (spread - cap) * ROBUST_WIDE_SPREAD_EDGE_MULT)
+    if ticks < WARMUP_TICKS + ROBUST_WARMUP_EXTRA_TICKS and product not in ROBUST_CORE_PRODUCTS:
+        edge += ROBUST_WARMUP_EDGE_ADD
+    return edge
+
+
 def estimate_local_s_hats(
     mids: Dict[str, float],
     tv: Dict[str, float],
@@ -851,7 +1321,7 @@ def compute_vertical_sanity_edge_adj(
 
 def residual_side_adjustments(rz: float) -> Tuple[float, float, bool, bool]:
     """Step 6 — return (bid_edge_add, ask_edge_add, disable_bid, disable_ask)."""
-    if not RESID_SIDE_GATE:
+    if not ENABLE_RESID_SIDE_GATE or not RESID_SIDE_GATE:
         return 0.0, 0.0, False, False
     bid_add = 0.0
     ask_add = 0.0
@@ -1038,10 +1508,12 @@ class Trader:
         velvet_vol = float(velvet_pstate.get("vol", 1.0))
         prev_s_hat = memory.get("s_hat")
 
-        s_hat = estimate_s_hat(mids, tv, velvet_vol, prev_s_hat)
+        s_hat = estimate_s_hat(mids, tv, velvet_vol, prev_s_hat) if ENABLE_S_HAT else None
         if s_hat is not None:
             memory["s_hat"] = s_hat
-        update_tv(tv, mids, state.order_depths, s_hat)
+        s_hat_dispersion = estimate_s_hat_dispersion(mids, tv, s_hat) if ENABLE_UNSEEN_DAY_GUARDS else 0.0
+        if ENABLE_TV_FAIR:
+            update_tv(tv, mids, state.order_depths, s_hat)
 
         local_s_hats = estimate_local_s_hats(mids, tv, velvet_vol, prev_s_hat, s_hat)
         vev_fairs = compute_vev_fairs(s_hat, tv, local_s_hats) if ENABLE_VEV_LADDER else {p: 0.5 for p in WINGS}
@@ -1071,6 +1543,7 @@ class Trader:
                     vev_fairs=vev_fairs,
                     vertical_tilts=vertical_tilts,
                     vertical_sanity=vertical_sanity,
+                    s_hat_dispersion=s_hat_dispersion,
                     net_delta=net_delta,
                     endgame=endgame,
                     stats=stats,
@@ -1096,6 +1569,7 @@ class Trader:
         vev_fairs: Dict[str, float],
         vertical_tilts: Dict[str, float],
         vertical_sanity: Dict[str, Dict[str, float]],
+        s_hat_dispersion: float,
         net_delta: float,
         endgame: bool,
         stats: Dict[str, int],
@@ -1163,6 +1637,14 @@ class Trader:
         if endgame:
             take_edge *= ENDGAME_TAKE_EDGE_MULT
             make_edge *= ENDGAME_MAKE_EDGE_MULT
+        if ENABLE_UNSEEN_DAY_GUARDS:
+            make_edge += robust_edge_add(product, spread, ticks)
+            if is_vev_non_wing and s_hat_dispersion > ROBUST_SHAT_DISPERSION_START:
+                make_edge += min(
+                    ROBUST_SHAT_DISPERSION_EDGE_CAP,
+                    (s_hat_dispersion - ROBUST_SHAT_DISPERSION_START)
+                    * ROBUST_SHAT_DISPERSION_EDGE_MULT,
+                )
 
         # ---- Gates ------------------------------------------------------- #
         delta_block_buy = ENABLE_DELTA_CONTROL and (
@@ -1362,6 +1844,35 @@ class Trader:
             ms_sell = max(1, room_s)
         elif room_s == 0:
             ms_sell = 0
+
+        if ENABLE_UNSEEN_DAY_GUARDS and limit > 0:
+            inv_ratio = abs(position) / float(limit)
+            if product not in ROBUST_CORE_PRODUCTS and product not in WINGS:
+                ms_buy = min(ms_buy, 1)
+                ms_sell = min(ms_sell, 1)
+            if inv_ratio >= ROBUST_INV_SOFT_RATIO:
+                if position > 0:
+                    ms_buy = 0
+                    ms_sell = min(max(ms_sell, 1), room_s)
+                elif position < 0:
+                    ms_sell = 0
+                    ms_buy = min(max(ms_buy, 1), room_b)
+            if inv_ratio >= ROBUST_INV_HARD_RATIO:
+                if position > 0:
+                    ms_buy = 0
+                elif position < 0:
+                    ms_sell = 0
+            if is_vev_non_wing and s_hat_dispersion >= ROBUST_SHAT_DISPERSION_HARD:
+                if position >= 0:
+                    ms_buy = 0
+                if position <= 0:
+                    ms_sell = 0
+            spread_cap = float(ROBUST_SPREAD_CAP_BY_PRODUCT.get(product, 8))
+            if spread > 1.75 * spread_cap:
+                if position >= 0:
+                    ms_buy = 0
+                if position <= 0:
+                    ms_sell = 0
 
         # Adverse-selection: shrink or skip on the adverse side.
         if adverse_buy:
