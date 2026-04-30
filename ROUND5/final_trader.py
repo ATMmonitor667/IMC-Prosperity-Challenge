@@ -169,6 +169,128 @@ class Trader:
         "PANEL_4X4",
     }
 
+    RESEARCH_FAMILIES = {
+        "SNACKPACKS": [
+            "SNACKPACK_CHOCOLATE",
+            "SNACKPACK_VANILLA",
+            "SNACKPACK_PISTACHIO",
+            "SNACKPACK_STRAWBERRY",
+            "SNACKPACK_RASPBERRY",
+        ],
+        "PANELS": [
+            "PANEL_1X2",
+            "PANEL_2X2",
+            "PANEL_1X4",
+            "PANEL_2X4",
+            "PANEL_4X4",
+        ],
+        "UV_VISORS": [
+            "UV_VISOR_YELLOW",
+            "UV_VISOR_AMBER",
+            "UV_VISOR_ORANGE",
+            "UV_VISOR_RED",
+            "UV_VISOR_MAGENTA",
+        ],
+        "TRANSLATORS": [
+            "TRANSLATOR_SPACE_GRAY",
+            "TRANSLATOR_ASTRO_BLACK",
+            "TRANSLATOR_ECLIPSE_CHARCOAL",
+            "TRANSLATOR_GRAPHITE_MIST",
+            "TRANSLATOR_VOID_BLUE",
+        ],
+        "GALAXY_SOUNDS": [
+            "GALAXY_SOUNDS_DARK_MATTER",
+            "GALAXY_SOUNDS_BLACK_HOLES",
+            "GALAXY_SOUNDS_PLANETARY_RINGS",
+            "GALAXY_SOUNDS_SOLAR_WINDS",
+            "GALAXY_SOUNDS_SOLAR_FLAMES",
+        ],
+        "SLEEP_PODS": [
+            "SLEEP_POD_SUEDE",
+            "SLEEP_POD_LAMB_WOOL",
+            "SLEEP_POD_POLYESTER",
+            "SLEEP_POD_NYLON",
+            "SLEEP_POD_COTTON",
+        ],
+        "MICROCHIPS": [
+            "MICROCHIP_CIRCLE",
+            "MICROCHIP_OVAL",
+            "MICROCHIP_SQUARE",
+            "MICROCHIP_RECTANGLE",
+            "MICROCHIP_TRIANGLE",
+        ],
+    }
+
+    PANEL_FEATURES = {
+        "PANEL_1X2": (1.0, 3.0, 2.0),
+        "PANEL_2X2": (1.0, 4.0, 4.0),
+        "PANEL_1X4": (1.0, 5.0, 4.0),
+        "PANEL_2X4": (1.0, 6.0, 8.0),
+        "PANEL_4X4": (1.0, 8.0, 16.0),
+    }
+
+    PASSIVE_FV_CONFIG = {
+        "PANEL_2X2": {
+            "family": "PANELS",
+            "edge": 0.25,
+            "skew": 0.75,
+            "cap": 6,
+            "mode": "panel_geometry",
+            "warmup": 0,
+        },
+        "UV_VISOR_MAGENTA": {
+            "family": "UV_VISORS",
+            "edge": 0.25,
+            "skew": 0.75,
+            "cap": 5,
+            "mode": "rolling_regression",
+            "warmup": 45,
+        },
+        "GALAXY_SOUNDS_SOLAR_FLAMES": {
+            "family": "GALAXY_SOUNDS",
+            "edge": 0.25,
+            "skew": 0.75,
+            "cap": 5,
+            "mode": "rolling_regression",
+            "warmup": 45,
+        },
+        "SNACKPACK_PISTACHIO": {
+            "family": "SNACKPACKS",
+            "edge": 0.50,
+            "skew": 0.25,
+            "cap": 4,
+            "mode": "rolling_regression",
+            "warmup": 45,
+        },
+    }
+
+    PAIR_BRANCHES = (
+        {
+            "left": "SLEEP_POD_POLYESTER",
+            "right": "SLEEP_POD_NYLON",
+            "lookback": 90,
+            "entry": 2.5,
+            "exit": 1.0,
+            "strength": 1.20,
+        },
+        {
+            "left": "MICROCHIP_CIRCLE",
+            "right": "MICROCHIP_RECTANGLE",
+            "lookback": 90,
+            "entry": 2.5,
+            "exit": 0.5,
+            "strength": 1.10,
+        },
+        {
+            "left": "TRANSLATOR_ECLIPSE_CHARCOAL",
+            "right": "TRANSLATOR_VOID_BLUE",
+            "lookback": 90,
+            "entry": 2.5,
+            "exit": 1.0,
+            "strength": 1.00,
+        },
+    )
+
     def _default_memory(self) -> Dict[str, Any]:
         return {
             "fair_hist": {},
@@ -185,6 +307,7 @@ class Trader:
             "position_state": {},
             "last_quotes": {},
             "tape_flow": {},
+            "pair_state": {},
         }
 
     def _load_memory(self, data: str) -> Dict[str, Any]:
@@ -331,6 +454,229 @@ class Trader:
             if fair > 0:
                 groups[self._family(product)].append(math.log(fair))
         return {fam: self._mean(vals) for fam, vals in groups.items() if vals}
+
+    def _solve_linear_system(self, matrix: List[List[float]], rhs: List[float]) -> Optional[List[float]]:
+        n = len(rhs)
+        if n == 0:
+            return []
+        aug = [list(matrix[i]) + [rhs[i]] for i in range(n)]
+
+        for col in range(n):
+            pivot = max(range(col, n), key=lambda row: abs(aug[row][col]))
+            if abs(aug[pivot][col]) < 1e-9:
+                return None
+            if pivot != col:
+                aug[col], aug[pivot] = aug[pivot], aug[col]
+
+            div = aug[col][col]
+            for j in range(col, n + 1):
+                aug[col][j] /= div
+
+            for row in range(n):
+                if row == col:
+                    continue
+                factor = aug[row][col]
+                if factor == 0:
+                    continue
+                for j in range(col, n + 1):
+                    aug[row][j] -= factor * aug[col][j]
+
+        return [aug[i][n] for i in range(n)]
+
+    def _least_squares_coeffs(
+        self,
+        rows: List[List[float]],
+        y_values: List[float],
+        ridge: float = 1e-5,
+    ) -> Optional[List[float]]:
+        if not rows or len(rows) != len(y_values):
+            return None
+        width = len(rows[0])
+        if width == 0 or len(rows) < width:
+            return None
+
+        xtx = [[0.0 for _ in range(width)] for _ in range(width)]
+        xty = [0.0 for _ in range(width)]
+        for row, y in zip(rows, y_values):
+            if len(row) != width:
+                return None
+            for i in range(width):
+                xty[i] += row[i] * y
+                for j in range(width):
+                    xtx[i][j] += row[i] * row[j]
+
+        for i in range(width):
+            xtx[i][i] += ridge
+
+        return self._solve_linear_system(xtx, xty)
+
+    def _dot(self, left: List[float], right: List[float]) -> float:
+        return sum(a * b for a, b in zip(left, right))
+
+    def _rolling_regression_fair(
+        self,
+        mem: Dict[str, Any],
+        product: str,
+        config: Dict[str, Any],
+        fairs: Dict[str, float],
+    ) -> Optional[float]:
+        family = str(config["family"])
+        products = [p for p in self.RESEARCH_FAMILIES[family] if p != product]
+        if product not in fairs or any(p not in fairs for p in products):
+            return None
+
+        histories = [mem.get("fair_hist", {}).get(product, [])]
+        histories.extend(mem.get("fair_hist", {}).get(p, []) for p in products)
+        min_len = min(len(hist) for hist in histories)
+        warmup = int(config.get("warmup", 45))
+        if min_len < warmup:
+            return None
+
+        lookback = min(90, min_len)
+        y_hist = histories[0][-lookback:]
+        hedge_histories = [hist[-lookback:] for hist in histories[1:]]
+        rows: List[List[float]] = []
+        for i in range(lookback):
+            rows.append([1.0] + [float(hist[i]) for hist in hedge_histories])
+
+        coeffs = self._least_squares_coeffs(rows, [float(v) for v in y_hist], ridge=0.05)
+        if coeffs is None:
+            return None
+
+        estimate = self._dot(coeffs, [1.0] + [float(fairs[p]) for p in products])
+        family_fairs = [float(fairs[p]) for p in self.RESEARCH_FAMILIES[family] if p in fairs]
+        if not family_fairs:
+            return None
+
+        lo = min(family_fairs) - 2.0 * max(1.0, self._std(family_fairs))
+        hi = max(family_fairs) + 2.0 * max(1.0, self._std(family_fairs))
+        return self._clip(estimate, lo, hi)
+
+    def _panel_geometry_fair(self, product: str, fairs: Dict[str, float]) -> Optional[float]:
+        if product not in self.PANEL_FEATURES:
+            return None
+        rows = []
+        y_values = []
+        for panel, features in self.PANEL_FEATURES.items():
+            if panel == product:
+                continue
+            if panel not in fairs:
+                return None
+            rows.append([float(x) for x in features])
+            y_values.append(float(fairs[panel]))
+
+        coeffs = self._least_squares_coeffs(rows, y_values, ridge=1e-4)
+        if coeffs is None:
+            return None
+        return self._dot(coeffs, [float(x) for x in self.PANEL_FEATURES[product]])
+
+    def _passive_branch_fair(
+        self,
+        mem: Dict[str, Any],
+        product: str,
+        fairs: Dict[str, float],
+    ) -> Optional[float]:
+        config = self.PASSIVE_FV_CONFIG.get(product)
+        if not config:
+            return None
+        mode = str(config.get("mode", "rolling_regression"))
+        if mode == "panel_geometry":
+            return self._panel_geometry_fair(product, fairs)
+        return self._rolling_regression_fair(mem, product, config, fairs)
+
+    def _make_passive_fair_value_orders(
+        self,
+        product: str,
+        depth: OrderDepth,
+        model_fair: float,
+        position: int,
+        config: Dict[str, Any],
+    ) -> List[Order]:
+        bid, _, ask, _ = self._best(depth)
+        orders: List[Order] = []
+        if bid is None or ask is None:
+            return orders
+
+        spread = max(1.0, float(ask - bid))
+        mid = 0.5 * (bid + ask)
+        cap = int(config.get("cap", 4))
+        edge = float(config.get("edge", 0.5))
+        skew = float(config.get("skew", 0.5))
+        reservation = float(model_fair) - skew * spread * position
+
+        buy_signal = reservation - mid >= edge * spread
+        sell_signal = mid - reservation >= edge * spread
+
+        buy_used = 0
+        sell_used = 0
+        if buy_signal and position < cap:
+            buy_used, sell_used = self._add_order(orders, product, bid, 1, position, buy_used, sell_used)
+        if sell_signal and position > -cap:
+            buy_used, sell_used = self._add_order(orders, product, ask, -1, position, buy_used, sell_used)
+
+        if not orders:
+            if position > cap:
+                self._add_order(orders, product, bid, -min(2, position - cap), position, buy_used, sell_used)
+            elif position < -cap:
+                self._add_order(orders, product, ask, min(2, -cap - position), position, buy_used, sell_used)
+
+        return orders
+
+    def _pair_alpha_overlays(self, mem: Dict[str, Any], fairs: Dict[str, float]) -> Dict[str, float]:
+        overlays: Dict[str, float] = defaultdict(float)
+        pair_state = mem.setdefault("pair_state", {})
+
+        for config in self.PAIR_BRANCHES:
+            left = str(config["left"])
+            right = str(config["right"])
+            if left not in fairs or right not in fairs:
+                continue
+            left_hist = mem.get("fair_hist", {}).get(left, [])
+            right_hist = mem.get("fair_hist", {}).get(right, [])
+            n = min(len(left_hist), len(right_hist), int(config.get("lookback", 90)))
+            if n < 45:
+                continue
+
+            left_vals = [float(v) for v in left_hist[-n:]]
+            right_vals = [float(v) for v in right_hist[-n:]]
+            right_mu = self._mean(right_vals)
+            left_mu = self._mean(left_vals)
+            right_var = sum((x - right_mu) ** 2 for x in right_vals)
+            if right_var <= 1e-9:
+                beta = 1.0
+            else:
+                beta = sum((l - left_mu) * (r - right_mu) for l, r in zip(left_vals, right_vals)) / right_var
+            if not math.isfinite(beta):
+                beta = 1.0
+
+            residuals = [l - beta * r for l, r in zip(left_vals, right_vals)]
+            resid_mu = self._mean(residuals)
+            resid_sd = max(1.0, self._std(residuals))
+            zscore = (float(fairs[left]) - beta * float(fairs[right]) - resid_mu) / resid_sd
+
+            key = f"{left}|{right}"
+            side = int(pair_state.get(key, 0))
+            entry = float(config.get("entry", 2.5))
+            exit_z = float(config.get("exit", 1.0))
+            if zscore >= entry:
+                side = -1
+            elif zscore <= -entry:
+                side = 1
+            elif abs(zscore) <= exit_z:
+                side = 0
+            pair_state[key] = side
+
+            if side == 0:
+                continue
+
+            hedge_sign = -1.0 if beta >= 0 else 1.0
+            strength = float(config.get("strength", 1.0))
+            if abs(zscore) > entry + 0.75:
+                strength *= 1.25
+            overlays[left] += side * strength
+            overlays[right] += side * hedge_sign * strength * self._clip(abs(beta), 0.55, 1.35)
+
+        return {product: self._clip(value, -2.2, 2.2) for product, value in overlays.items()}
 
     def _family_regimes(self, mem: Dict[str, Any], fairs: Dict[str, float]) -> Dict[str, Dict[str, float]]:
         groups: Dict[str, List[Tuple[str, float]]] = defaultdict(list)
@@ -596,22 +942,23 @@ class Trader:
                 seen.add(key)
                 seen_list.append(key)
 
-            buyer = getattr(tr, "buyer", "") or ""
-            seller = getattr(tr, "seller", "") or ""
-            if (not buyer or buyer == "SUBMISSION") and (not seller or seller == "SUBMISSION"):
-                continue
-
             price = float(getattr(tr, "price", fair))
             qty = max(1, abs(int(getattr(tr, "quantity", 1))))
             qscale = min(2.0, math.sqrt(qty))
             if is_new:
                 signed = 0.0
-                if price > fair:
+                edge = (price - fair) / max(1.0, vol)
+                if edge > 0.15:
                     signed = 1.0
-                elif price < fair:
+                elif edge < -0.15:
                     signed = -1.0
                 if signed:
                     tape[product] = self._clip(float(tape.get(product, 0.0)) + signed * qscale, -6.0, 6.0)
+
+            buyer = getattr(tr, "buyer", "") or ""
+            seller = getattr(tr, "seller", "") or ""
+            if (not buyer or buyer == "SUBMISSION") and (not seller or seller == "SUBMISSION"):
+                continue
 
             # A trade through/above fair tags the buyer as potentially informed upward.
             if buyer and buyer != "SUBMISSION" and price >= fair:
@@ -1004,6 +1351,7 @@ class Trader:
         self._resolve_cp_markouts(mem, state.timestamp, fairs)
         self._resolve_side_markouts(mem, state.timestamp, fairs)
         self._record_own_passive_fills(mem, state, fairs, spreads)
+        pair_overlays = self._pair_alpha_overlays(mem, fairs)
 
         next_quotes: Dict[str, Dict[str, int]] = {}
 
@@ -1015,6 +1363,26 @@ class Trader:
             position = int(state.position.get(product, 0))
             fair = fairs[product]
             spread = spreads.get(product, 1.0)
+
+            passive_config = self.PASSIVE_FV_CONFIG.get(product)
+            if passive_config:
+                branch_fair = self._passive_branch_fair(mem, product, fairs)
+                if branch_fair is not None:
+                    branch_orders = self._make_passive_fair_value_orders(
+                        product,
+                        depth,
+                        branch_fair,
+                        position,
+                        passive_config,
+                    )
+                    if branch_orders or product in self.HARD_AVOID:
+                        result[product] = branch_orders
+                        bid, _, ask, _ = self._best(depth)
+                        if bid is not None and ask is not None:
+                            quote_record = self._passive_quote_record(branch_orders, bid, ask)
+                            if quote_record:
+                                next_quotes[product] = quote_record
+                        continue
 
             if product in self.HARD_AVOID:
                 result[product] = self._flatten_orders(product, depth, position)
@@ -1035,6 +1403,7 @@ class Trader:
                 scale,
                 family_regimes.get(self._family(product), {}),
             )
+            alpha = self._clip(alpha + pair_overlays.get(product, 0.0), -5.0, 5.0)
 
             target = self._target_position(product, position, alpha, scale, vol, spread)
             target, repair_only = self._state_adjust_target(
