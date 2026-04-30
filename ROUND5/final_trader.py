@@ -20,6 +20,11 @@ class Trader:
     - Uses state-based risk reduction from signal conflict, live markouts, inventory age, and volatility.
     - Adds side-specific adverse-selection tracking for passive bid/ask fills.
     - Adds family-regime scaling and capped anonymous tape-flow.
+    - Adds researched Round 5 branches from `optimal_algorithm_research.py`: passive
+      single-name fair-value quoting for PANELS/UV/GALAXY/SNACKPACKS and residual-pair
+      overlays for SLEEP_PODS/MICROCHIPS/TRANSLATORS.
+    - Restores neutral two-sided core quoting from the profitable 570532 baseline;
+      the failed 571500 run over-gated low-alpha quoting and mostly stopped trading.
     - Uses warm-up before trusting relative value so permanent level differences are not
       mistaken for mispricing.
     - Adds online alpha markout scoring. If a product starts losing live, its size decays.
@@ -28,7 +33,7 @@ class Trader:
     """
 
     HARD_LIMIT = 10
-    FAIR_HISTORY = 90
+    FAIR_HISTORY = 180
     RESID_HISTORY = 90
     RET_HISTORY = 60
     MARKOUT_DELAY = 500
@@ -37,11 +42,11 @@ class Trader:
     MIN_REL_HISTORY = 18
     MIN_PRICE_HISTORY = 16
 
-    MAX_PENDING_ALPHA = 1200
-    MAX_PENDING_CP = 1600
-    MAX_PENDING_SIDE = 1600
-    MAX_SEEN_TRADES = 5000
-    MAX_SEEN_OWN_TRADES = 2500
+    MAX_PENDING_ALPHA = 350
+    MAX_PENDING_CP = 350
+    MAX_PENDING_SIDE = 250
+    MAX_SEEN_TRADES = 600
+    MAX_SEEN_OWN_TRADES = 300
     INVENTORY_AGE_LIMIT = 5000
 
     FAMILY_PREFIXES = (
@@ -232,35 +237,74 @@ class Trader:
     PASSIVE_FV_CONFIG = {
         "PANEL_2X2": {
             "family": "PANELS",
-            "edge": 0.25,
-            "skew": 0.75,
+            "edge": 1.00,
+            "skew": 1.00,
             "cap": 6,
             "mode": "panel_geometry",
             "warmup": 0,
+            "exclusive": True,
         },
         "UV_VISOR_MAGENTA": {
             "family": "UV_VISORS",
-            "edge": 0.25,
-            "skew": 0.75,
+            "edge": 0.50,
+            "skew": 1.00,
             "cap": 5,
-            "mode": "rolling_regression",
-            "warmup": 45,
+            "mode": "static_regression",
+            "exclusive": True,
         },
         "GALAXY_SOUNDS_SOLAR_FLAMES": {
             "family": "GALAXY_SOUNDS",
             "edge": 0.25,
-            "skew": 0.75,
-            "cap": 5,
-            "mode": "rolling_regression",
-            "warmup": 45,
+            "skew": 0.00,
+            "cap": 3,
+            "mode": "static_regression",
+            "exclusive": False,
         },
         "SNACKPACK_PISTACHIO": {
             "family": "SNACKPACKS",
-            "edge": 0.50,
-            "skew": 0.25,
+            "edge": 0.25,
+            "skew": 0.75,
             "cap": 4,
             "mode": "rolling_regression",
             "warmup": 45,
+            "exclusive": True,
+        },
+    }
+
+    STATIC_FV_MODELS = {
+        "UV_VISOR_MAGENTA": {
+            "family": "UV_VISORS",
+            "hedges": [
+                "UV_VISOR_YELLOW",
+                "UV_VISOR_AMBER",
+                "UV_VISOR_ORANGE",
+                "UV_VISOR_RED",
+            ],
+            # Day-3 leave-one-out regression selected by the robustness scan.
+            "coeffs": [
+                20714.9226078,
+                -0.0552455310522,
+                -0.486387128507,
+                -0.0717438027418,
+                -0.398674563585,
+            ],
+        },
+        "GALAXY_SOUNDS_SOLAR_FLAMES": {
+            "family": "GALAXY_SOUNDS",
+            "hedges": [
+                "GALAXY_SOUNDS_DARK_MATTER",
+                "GALAXY_SOUNDS_BLACK_HOLES",
+                "GALAXY_SOUNDS_PLANETARY_RINGS",
+                "GALAXY_SOUNDS_SOLAR_WINDS",
+            ],
+            # Day-3 leave-one-out regression selected by the robustness scan.
+            "coeffs": [
+                25620.4410072,
+                0.0170843279977,
+                -0.313030995198,
+                -0.650838580412,
+                -0.339647570417,
+            ],
         },
     }
 
@@ -268,28 +312,37 @@ class Trader:
         {
             "left": "SLEEP_POD_POLYESTER",
             "right": "SLEEP_POD_NYLON",
-            "lookback": 90,
+            "lookback": 180,
             "entry": 2.5,
-            "exit": 1.0,
-            "strength": 1.20,
+            "exit": 0.5,
+            "strength": 0.75,
         },
         {
             "left": "MICROCHIP_CIRCLE",
             "right": "MICROCHIP_RECTANGLE",
-            "lookback": 90,
+            "lookback": 180,
             "entry": 2.5,
             "exit": 0.5,
-            "strength": 1.10,
+            "strength": 0.55,
         },
         {
             "left": "TRANSLATOR_ECLIPSE_CHARCOAL",
             "right": "TRANSLATOR_VOID_BLUE",
-            "lookback": 90,
+            "lookback": 180,
             "entry": 2.5,
             "exit": 1.0,
-            "strength": 1.00,
+            "strength": 0.35,
         },
     )
+
+    PAIR_BRANCH_PRODUCTS = {
+        "SLEEP_POD_POLYESTER",
+        "SLEEP_POD_NYLON",
+        "MICROCHIP_CIRCLE",
+        "MICROCHIP_RECTANGLE",
+        "TRANSLATOR_ECLIPSE_CHARCOAL",
+        "TRANSLATOR_VOID_BLUE",
+    }
 
     def _default_memory(self) -> Dict[str, Any]:
         return {
@@ -308,6 +361,7 @@ class Trader:
             "last_quotes": {},
             "tape_flow": {},
             "pair_state": {},
+            "fv_model_cache": {},
         }
 
     def _load_memory(self, data: str) -> Dict[str, Any]:
@@ -519,11 +573,23 @@ class Trader:
         product: str,
         config: Dict[str, Any],
         fairs: Dict[str, float],
+        timestamp: int,
     ) -> Optional[float]:
         family = str(config["family"])
         products = [p for p in self.RESEARCH_FAMILIES[family] if p != product]
         if product not in fairs or any(p not in fairs for p in products):
             return None
+
+        cache = mem.setdefault("fv_model_cache", {}).get(product)
+        if cache and timestamp - int(cache.get("t", -10_000)) <= 900:
+            coeffs = cache.get("coeffs")
+            if isinstance(coeffs, list) and len(coeffs) == len(products) + 1:
+                estimate = self._dot([float(x) for x in coeffs], [1.0] + [float(fairs[p]) for p in products])
+                family_fairs = [float(fairs[p]) for p in self.RESEARCH_FAMILIES[family] if p in fairs]
+                if family_fairs:
+                    lo = min(family_fairs) - 2.0 * max(1.0, self._std(family_fairs))
+                    hi = max(family_fairs) + 2.0 * max(1.0, self._std(family_fairs))
+                    return self._clip(estimate, lo, hi)
 
         histories = [mem.get("fair_hist", {}).get(product, [])]
         histories.extend(mem.get("fair_hist", {}).get(p, []) for p in products)
@@ -542,12 +608,33 @@ class Trader:
         coeffs = self._least_squares_coeffs(rows, [float(v) for v in y_hist], ridge=0.05)
         if coeffs is None:
             return None
+        mem.setdefault("fv_model_cache", {})[product] = {"t": timestamp, "coeffs": coeffs}
 
         estimate = self._dot(coeffs, [1.0] + [float(fairs[p]) for p in products])
         family_fairs = [float(fairs[p]) for p in self.RESEARCH_FAMILIES[family] if p in fairs]
         if not family_fairs:
             return None
 
+        lo = min(family_fairs) - 2.0 * max(1.0, self._std(family_fairs))
+        hi = max(family_fairs) + 2.0 * max(1.0, self._std(family_fairs))
+        return self._clip(estimate, lo, hi)
+
+    def _static_regression_fair(self, product: str, fairs: Dict[str, float]) -> Optional[float]:
+        model = self.STATIC_FV_MODELS.get(product)
+        if not model:
+            return None
+        hedges = model.get("hedges", [])
+        coeffs = model.get("coeffs", [])
+        if len(coeffs) != len(hedges) + 1:
+            return None
+        if any(str(hedge) not in fairs for hedge in hedges):
+            return None
+
+        estimate = self._dot([float(x) for x in coeffs], [1.0] + [float(fairs[str(hedge)]) for hedge in hedges])
+        family = str(model.get("family", ""))
+        family_fairs = [float(fairs[p]) for p in self.RESEARCH_FAMILIES.get(family, []) if p in fairs]
+        if not family_fairs:
+            return None
         lo = min(family_fairs) - 2.0 * max(1.0, self._std(family_fairs))
         hi = max(family_fairs) + 2.0 * max(1.0, self._std(family_fairs))
         return self._clip(estimate, lo, hi)
@@ -575,6 +662,7 @@ class Trader:
         mem: Dict[str, Any],
         product: str,
         fairs: Dict[str, float],
+        timestamp: int,
     ) -> Optional[float]:
         config = self.PASSIVE_FV_CONFIG.get(product)
         if not config:
@@ -582,7 +670,9 @@ class Trader:
         mode = str(config.get("mode", "rolling_regression"))
         if mode == "panel_geometry":
             return self._panel_geometry_fair(product, fairs)
-        return self._rolling_regression_fair(mem, product, config, fairs)
+        if mode == "static_regression":
+            return self._static_regression_fair(product, fairs)
+        return self._rolling_regression_fair(mem, product, config, fairs, timestamp)
 
     def _make_passive_fair_value_orders(
         self,
@@ -742,9 +832,9 @@ class Trader:
         if product in self.HARD_AVOID:
             return 0.0
         if product in self.AVOID:
-            return 0.42
+            return 0.45 if product in self.PAIR_BRANCH_PRODUCTS else 0.0
         if product in self.STRONG:
-            return 1.12
+            return 1.18
         if product in self.CAUTIOUS:
             return 0.72
         return 0.55
@@ -771,12 +861,16 @@ class Trader:
         if prior <= 0.0:
             return 0.0
         live = self._live_perf_scale(mem, product)
-        return self._clip(prior * (0.55 + 0.45 * live), 0.12, 1.24)
+        return prior * live
 
     def _product_cap(self, product: str, scale: float) -> int:
         if scale <= 0:
             return 0
-        return int(self._clip(round(2 + 5 * scale), 2, 8))
+        if product in self.STRONG:
+            return 8
+        if product in self.CAUTIOUS or product in self.PAIR_BRANCH_PRODUCTS:
+            return 5
+        return 4
 
     def _trade_key(self, product: str, tr: Any) -> str:
         return (
@@ -1116,7 +1210,7 @@ class Trader:
         spread: float,
         timestamp: int,
     ) -> Tuple[int, bool]:
-        if position == 0 and abs(alpha) >= 0.55:
+        if position == 0:
             return target, False
 
         rv = rel + 0.45 * own_mr
@@ -1258,6 +1352,8 @@ class Trader:
             ask_px = ask
 
         cap = self._product_cap(product, scale)
+        if cap <= 0:
+            return self._flatten_orders(product, depth, position)
         base = 2 if product in self.STRONG and abs(alpha) > 0.75 else 1
 
         if target > position:
@@ -1297,7 +1393,7 @@ class Trader:
         bid_conf = alpha + 0.30 * top_imb + bid_quality
         ask_conf = -alpha - 0.30 * top_imb + ask_quality
 
-        if repair_only or abs(alpha) < 0.50:
+        if repair_only:
             if position >= 0:
                 buy_sz = 0
             if position <= 0:
@@ -1366,7 +1462,7 @@ class Trader:
 
             passive_config = self.PASSIVE_FV_CONFIG.get(product)
             if passive_config:
-                branch_fair = self._passive_branch_fair(mem, product, fairs)
+                branch_fair = self._passive_branch_fair(mem, product, fairs, state.timestamp)
                 if branch_fair is not None:
                     branch_orders = self._make_passive_fair_value_orders(
                         product,
@@ -1375,7 +1471,7 @@ class Trader:
                         position,
                         passive_config,
                     )
-                    if branch_orders or product in self.HARD_AVOID:
+                    if branch_orders or product in self.HARD_AVOID or bool(passive_config.get("exclusive", False)):
                         result[product] = branch_orders
                         bid, _, ask, _ = self._best(depth)
                         if bid is not None and ask is not None:
@@ -1385,6 +1481,9 @@ class Trader:
                         continue
 
             if product in self.HARD_AVOID:
+                result[product] = self._flatten_orders(product, depth, position)
+                continue
+            if product in self.AVOID and product not in self.PAIR_BRANCH_PRODUCTS:
                 result[product] = self._flatten_orders(product, depth, position)
                 continue
 
