@@ -1,0 +1,528 @@
+Round 5 Optimal Algorithm Research Explanation
+=============================================
+
+Purpose
+-------
+
+The goal of this research was to move from a broad "try many ideas" scan toward a practical
+algorithm that can maximize PnL without breaking the working behavior of the profitable
+baseline bot.
+
+The research used two main evidence sources:
+
+1. Historical Round 5 price and trade data from:
+   - ROUND5/round5/prices_round_5_day_2.csv
+   - ROUND5/round5/prices_round_5_day_3.csv
+   - ROUND5/round5/prices_round_5_day_4.csv
+   - ROUND5/round5/trades_round_5_day_2.csv
+   - ROUND5/round5/trades_round_5_day_3.csv
+   - ROUND5/round5/trades_round_5_day_4.csv
+
+2. Bot logs:
+   - ROUND5/LOGS/570532.json, the profitable baseline run.
+   - ROUND5/LOGS/571500/571500.json, the failed run from the previous algorithm attempt.
+
+The main research code is:
+
+- ROUND5/family_strategy_scan.py
+- ROUND5/optimal_algorithm_research.py
+
+The generated research outputs are:
+
+- ROUND5/optimal_algorithm_research_report.md
+- ROUND5/optimal_algorithm_research_results.json
+- ROUND5/571500_failure_analysis.md
+
+
+High-Level Conclusion
+---------------------
+
+The best path is not to replace the profitable core algorithm. The profitable 570532 run made
+money because it continuously provided selective two-sided liquidity in strong products while
+using relative-value, trend, microprice, and tape-flow signals to bias inventory.
+
+The failed 571500 algorithm mostly failed because it stopped trading. It did not lose a huge
+amount by trading bad products. Instead, it removed or over-gated the neutral market-making
+behavior that had produced most of the baseline PnL.
+
+Therefore, the optimal next algorithm should:
+
+1. Keep the profitable 570532-style core.
+2. Restore neutral two-sided quoting when flat.
+3. Keep the original avoid-list discipline.
+4. Add only the researched branches that survived walk-forward and robustness tests.
+5. Use the researched branches as isolated product-specific or pair-specific overlays, not as a
+   full replacement for the core.
+
+
+Product Families Studied
+------------------------
+
+The user requested analysis of these families:
+
+SNACKPACKS:
+- SNACKPACK_CHOCOLATE
+- SNACKPACK_VANILLA
+- SNACKPACK_PISTACHIO
+- SNACKPACK_STRAWBERRY
+- SNACKPACK_RASPBERRY
+
+PANELS:
+- PANEL_1X2
+- PANEL_2X2
+- PANEL_1X4
+- PANEL_2X4
+- PANEL_4X4
+
+UV_VISORS:
+- UV_VISOR_YELLOW
+- UV_VISOR_AMBER
+- UV_VISOR_ORANGE
+- UV_VISOR_RED
+- UV_VISOR_MAGENTA
+
+TRANSLATORS:
+- TRANSLATOR_SPACE_GRAY
+- TRANSLATOR_ASTRO_BLACK
+- TRANSLATOR_ECLIPSE_CHARCOAL
+- TRANSLATOR_GRAPHITE_MIST
+- TRANSLATOR_VOID_BLUE
+
+GALAXY_SOUNDS:
+- GALAXY_SOUNDS_DARK_MATTER
+- GALAXY_SOUNDS_BLACK_HOLES
+- GALAXY_SOUNDS_PLANETARY_RINGS
+- GALAXY_SOUNDS_SOLAR_WINDS
+- GALAXY_SOUNDS_SOLAR_FLAMES
+
+SLEEP_PODS:
+- SLEEP_POD_SUEDE
+- SLEEP_POD_LAMB_WOOL
+- SLEEP_POD_POLYESTER
+- SLEEP_POD_NYLON
+- SLEEP_POD_COTTON
+
+MICROCHIPS:
+- MICROCHIP_CIRCLE
+- MICROCHIP_OVAL
+- MICROCHIP_SQUARE
+- MICROCHIP_RECTANGLE
+- MICROCHIP_TRIANGLE
+
+
+Research Methodology
+--------------------
+
+The first scanner, family_strategy_scan.py, tested broad families of ideas:
+
+1. Microstructure scan
+   - Measured spreads, depths, return volatility, and trade counts.
+   - Purpose: identify which families have enough liquidity and movement to support trading.
+
+2. Cross-sectional signals
+   - Tested family-relative momentum and mean reversion.
+   - Looked at whether products that were rich or cheap relative to their family tended to
+     continue moving or revert.
+
+3. Residual pair trading
+   - Picked pairs inside each family.
+   - Fit a beta on one day and traded residual z-scores on the next day.
+   - Used walk-forward folds:
+     - fit day 2, test day 3
+     - fit day 3, test day 4
+
+4. Leader-follower diagnostics
+   - Tested whether one product's move predicted another product's future move.
+
+5. Passive fair-value quoting
+   - For one target product, estimated fair value from the rest of its family.
+   - Quoted passively when the model fair value was sufficiently above or below the market mid.
+   - Used public trade tape as a conservative fill proxy.
+
+The second research script, optimal_algorithm_research.py, made this more rigorous by focusing
+only on promising candidates and stress-testing them:
+
+1. Passive branch parameter robustness
+   - Tested edge thresholds from 0.25 to 1.00 spreads.
+   - Tested inventory skew from 0.00 to 1.00 spreads.
+   - Tested multiple fair-value model choices where relevant.
+   - Recorded worst fold, mean fold, positive folds, fill counts, drawdown, and quarter
+     stability.
+
+2. Passive fill stress
+   - Tested whether the strategy still filled when requiring public trades to go through the
+     quote by 0.25 or 0.50 spreads.
+   - Important note: this is a queue/fill-availability stress. In Round 5, many public fills
+     happen at the touch, so requiring fill-through often produces zero fills. That does not
+     automatically invalidate the base passive strategy.
+
+3. Passive signed markouts
+   - For each simulated fill, measured signed markout after 1, 5, 10, 20, and 50 bars.
+   - Positive signed markout means buys tended to be followed by higher mids and sells tended
+     to be followed by lower mids.
+
+4. Cap sensitivity
+   - Tested smaller and larger caps to see whether a branch depended on excessive size.
+
+5. Pair robustness
+   - Tested lookbacks of 60, 90, 120, 180, and 300 bars.
+   - Tested entry z-scores of 2.0, 2.5, and 3.0.
+   - Tested exit z-scores of 0.5 and 1.0.
+   - Stress-tested slippage of 0.0, 0.5, and 1.0.
+
+6. Current bot log diagnostics
+   - Parsed 570532 and 571500 logs by product and family.
+   - Compared final PnL, drawdown, and open positions.
+   - Identified whether a product was losing money or simply not being traded.
+
+
+Main Quantitative Results
+-------------------------
+
+The final research decision matrix selected three full-size candidates and four small-size
+overlay candidates.
+
+Full-size candidates:
+
+1. UV_VISOR_MAGENTA passive fair-value branch
+   - Model: static leave-one-out regression.
+   - Edge: 0.50 spreads.
+   - Skew: 1.00 spreads.
+   - Cap: 5.
+   - Walk-forward PnL:
+     - day2 -> day3: 4186
+     - day3 -> day4: 4751
+   - Worst fold: 4186
+   - Mean fold: 4468.5
+   - Total fills: 93
+   - Positive quarters: 7 out of 8
+   - Robust config share: 0.50
+   - Interpretation: This was the strongest researched passive branch. The model was stable
+     across both folds and had good signed markouts.
+
+2. PANEL_2X2 panel-geometry passive branch
+   - Model: panel geometry.
+   - Edge: 1.00 spreads.
+   - Skew: 1.00 spreads.
+   - Cap: 6.
+   - Walk-forward PnL:
+     - day2 -> day3: 5244
+     - day3 -> day4: 1789
+   - Worst fold: 1789
+   - Mean fold: 3516.5
+   - Total fills: 26
+   - Positive quarters: 5 out of 8
+   - Robust config share: 1.00
+   - Interpretation: This branch is important because the profitable 570532 run made 0 PnL
+     in PANEL_2X2. The generic engine should still avoid PANEL_2X2, but a dedicated
+     panel-geometry branch can quote it.
+
+3. SNACKPACK_PISTACHIO passive fair-value branch
+   - Model: rolling leave-one-out regression.
+   - Edge: 0.25 spreads.
+   - Skew: 0.75 spreads.
+   - Cap: 4.
+   - Walk-forward PnL:
+     - day2 -> day3: 596
+     - day3 -> day4: 591
+   - Worst fold: 591
+   - Mean fold: 593.5
+   - Total fills: 155
+   - Positive quarters: 7 out of 8
+   - Robust config share: 0.72
+   - Interpretation: This branch is smaller than UV or Panels, but very stable and high-fill.
+
+Small-size or overlay candidates:
+
+1. SLEEP_POD_POLYESTER vs SLEEP_POD_NYLON residual pair
+   - Best researched lookback: 180
+   - Entry: 2.5
+   - Exit: 0.5
+   - Walk-forward PnL:
+     - day2 -> day3: 3174
+     - day3 -> day4: 8918
+   - Worst fold: 3174
+   - Mean fold: 6046
+   - But robust config share was only 0.23.
+   - Interpretation: Large upside, but parameter fragility means it should be used as a
+     smaller overlay, not as a forced large pair trade.
+
+2. MICROCHIP_CIRCLE vs MICROCHIP_RECTANGLE residual pair
+   - Best researched lookback: 300
+   - Entry: 2.5
+   - Exit: 0.5
+   - Walk-forward PnL:
+     - day2 -> day3: 930
+     - day3 -> day4: 5445
+   - Worst fold: 930
+   - Mean fold: 3187.5
+   - Robust config share: 0.07.
+   - Interpretation: Positive, but fragile. Use only as a small overlay.
+
+3. TRANSLATOR_ECLIPSE_CHARCOAL vs TRANSLATOR_VOID_BLUE residual pair
+   - Best researched lookback: 300
+   - Entry: 2.5
+   - Exit: 1.0
+   - Walk-forward PnL:
+     - day2 -> day3: 774
+     - day3 -> day4: 478
+   - Worst fold: 478
+   - Mean fold: 626
+   - Robust config share: 0.10.
+   - Interpretation: Positive but fragile. Use only as a small reservation-price overlay.
+
+4. GALAXY_SOUNDS_SOLAR_FLAMES passive branch
+   - Model: static leave-one-out regression.
+   - Edge: 0.25 spreads.
+   - Skew: 0.00 spreads.
+   - Cap in research: 5, but reduced in implementation to 3 because quarter stability was
+     weaker.
+   - Walk-forward PnL:
+     - day2 -> day3: 1045
+     - day3 -> day4: 865
+   - Worst fold: 865
+   - Mean fold: 955
+   - Positive quarters: only 3 out of 8.
+   - Interpretation: Good fold-level PnL, but less stable intraday. Use small size only.
+
+
+Why 571500 Failed
+-----------------
+
+The failed 571500 run made only 480.15 PnL. The profitable 570532 run made 29845.66 PnL.
+
+The key observation from parsing both logs was:
+
+- 570532 ended with 22 requested-family open positions.
+- 571500 ended with only 1 requested-family open position.
+- Most products that made money in 570532 had exactly 0 PnL in 571500.
+
+This means the main failure was inactivity.
+
+Major products that disappeared:
+
+- PANEL_4X4:
+  - 570532 PnL: 3158.95
+  - 571500 PnL: 161.00
+  - Delta: -2997.95
+
+- TRANSLATOR_ECLIPSE_CHARCOAL:
+  - 570532 PnL: 2996.02
+  - 571500 PnL: 0.00
+  - Delta: -2996.02
+
+- SLEEP_POD_NYLON:
+  - 570532 PnL: 1706.42
+  - 571500 PnL: -148.00
+  - Delta: -1854.42
+
+- GALAXY_SOUNDS_BLACK_HOLES:
+  - 570532 PnL: 1574.77
+  - 571500 PnL: 0.00
+  - Delta: -1574.77
+
+- UV_VISOR_RED:
+  - 570532 PnL: 1574.60
+  - 571500 PnL: 0.00
+  - Delta: -1574.60
+
+- TRANSLATOR_GRAPHITE_MIST:
+  - 570532 PnL: 1183.59
+  - 571500 PnL: 0.00
+  - Delta: -1183.59
+
+- PANEL_2X4:
+  - 570532 PnL: 1081.66
+  - 571500 PnL: 0.00
+  - Delta: -1081.66
+
+The concrete code-level problems were:
+
+1. Over-gating neutral market making
+   - In the failed algorithm, if alpha was small, the state-adjustment logic set repair_only.
+   - If the position was zero, repair_only suppressed both buying and selling.
+   - This meant the bot often did not quote at all.
+   - The profitable 570532 baseline relied on neutral two-sided quoting even when alpha was
+     small.
+
+2. Avoid-list behavior was diluted
+   - The previous patch tried to let avoided products earn size back.
+   - But the profitable baseline treated avoid-list products as truly avoided.
+   - Some avoided products were allowed to quote accidentally or inconsistently.
+
+3. Zero-cap products could still create orders
+   - The previous algorithm did not return early from _make_orders when cap <= 0.
+   - This allowed products that should have been inactive to still place quotes.
+
+4. The algorithm used early research parameters, not the final robustness-selected ones
+   - PANEL_2X2 used edge 0.25 and skew 0.75, but final research selected edge 1.00 and
+     skew 1.00.
+   - UV_VISOR_MAGENTA used rolling regression, but final research selected static day-3
+     leave-one-out regression.
+   - Pair branches used lookback 90, but the robustness scan favored longer lookbacks.
+
+
+How The Final Trader Was Changed
+--------------------------------
+
+The repaired final_trader.py uses these principles:
+
+1. Keep the profitable core active
+   - The bot now restores neutral two-sided quoting when flat.
+   - Small alpha does not automatically suppress both sides.
+
+2. Keep avoided products truly avoided
+   - If a product is in the avoid list, the generic engine will not trade it.
+   - Exceptions are allowed only for explicit researched branches, such as PANEL_2X2 passive
+     geometry or residual pair products.
+
+3. Add hard early return for zero cap
+   - If the product cap is zero, _make_orders returns flattening orders only.
+   - This prevents accidental quotes in disabled products.
+
+4. Add researched passive branches
+   - PANEL_2X2:
+     - panel_geometry
+     - edge 1.00
+     - skew 1.00
+     - cap 6
+     - exclusive branch
+
+   - UV_VISOR_MAGENTA:
+     - static_regression
+     - edge 0.50
+     - skew 1.00
+     - cap 5
+     - exclusive branch
+
+   - SNACKPACK_PISTACHIO:
+     - rolling_regression
+     - edge 0.25
+     - skew 0.75
+     - cap 4
+     - exclusive branch
+
+   - GALAXY_SOUNDS_SOLAR_FLAMES:
+     - static_regression
+     - edge 0.25
+     - skew 0.00
+     - cap 3
+     - non-exclusive, small overlay
+
+5. Add static regression coefficients
+   - UV_VISOR_MAGENTA and GALAXY_SOUNDS_SOLAR_FLAMES use hardcoded day-3 trained static
+     regression coefficients from the research script.
+   - This avoids long warm-up delays and matches the robustness-selected model.
+
+6. Add pair overlays carefully
+   - Pair branches do not force large taker trades.
+   - They modify alpha/reservation behavior in small sizes.
+   - Practical lookbacks were capped at 180 in implementation to control runtime and state size.
+
+7. Control runtime
+   - traderData serialization was changed from jsonpickle to compact standard json.
+   - Retained histories and pending event queues were capped.
+   - Synthetic day-4 validation showed traderData remained under about 283k characters.
+
+
+Validation Performed
+--------------------
+
+The patched final_trader.py passed syntax validation:
+
+python -m py_compile ROUND5/final_trader.py
+
+I also ran synthetic order-generation checks on day 4 data:
+
+1. 500-tick check:
+   - 500 ticks processed.
+   - 500 ticks had nonempty orders.
+   - No exceptions.
+
+2. Full day-4 10,000-tick synthetic check:
+   - 10,000 ticks processed.
+   - 10,000 ticks had nonempty orders.
+   - Total orders: 454,575.
+   - Final traderData length: 275,303 characters.
+   - Maximum traderData length: 282,246 characters.
+   - All researched passive branches were active:
+     - GALAXY_SOUNDS_SOLAR_FLAMES
+     - PANEL_2X2
+     - UV_VISOR_MAGENTA
+     - SNACKPACK_PISTACHIO
+
+Important caveat: the synthetic pass checks runtime, state size, and order generation. It is not
+a full exchange backtest with fills and PnL. The full PnL estimate still comes from the research
+simulations and from comparing the real 570532 and 571500 logs.
+
+
+Final Algorithmic Recommendation
+--------------------------------
+
+The best current algorithm is a hybrid:
+
+1. Use 570532-style core behavior as the base:
+   - family-relative value
+   - own-product mean reversion
+   - selective trend
+   - microprice/imbalance
+   - anonymous tape-flow
+   - passive market making
+   - conservative taker logic
+
+2. Preserve the avoid list from the profitable baseline.
+
+3. Add researched passive branches:
+   - full size:
+     - UV_VISOR_MAGENTA
+     - PANEL_2X2
+     - SNACKPACK_PISTACHIO
+   - small size:
+     - GALAXY_SOUNDS_SOLAR_FLAMES
+
+4. Add pair overlays at small strength:
+   - SLEEP_POD_POLYESTER vs SLEEP_POD_NYLON
+   - MICROCHIP_CIRCLE vs MICROCHIP_RECTANGLE
+   - TRANSLATOR_ECLIPSE_CHARCOAL vs TRANSLATOR_VOID_BLUE
+
+5. Do not let researched branches shut down the core.
+   - The most important lesson from 571500 is that protecting against bad trades can become
+     worse than bad trades if it suppresses the profitable market-making engine.
+
+
+Remaining Risks
+---------------
+
+1. Passive fill modeling is approximate
+   - The research used public trade-through checks.
+   - Actual queue priority can differ.
+
+2. Pair branch fragility
+   - Pair branches showed positive PnL, but some had weak parameter robustness.
+   - They should remain small overlays until live logs prove they help.
+
+3. Static coefficients are day-3 trained
+   - They worked well in the day3 -> day4 fold.
+   - If the hidden environment changes materially, static coefficients could become stale.
+   - This is why only the strongest static branches were used.
+
+4. Core still dominates PnL
+   - The research branches can improve the algorithm, but the baseline engine still produces
+     most of the expected PnL.
+   - Any future change must avoid repeating the 571500 failure mode of suppressing core
+     liquidity provision.
+
+
+Bottom Line
+-----------
+
+The research does not support replacing the bot with a completely new strategy. It supports a
+careful hybrid algorithm:
+
+- keep the profitable 570532 core;
+- fix the over-gating that caused 571500 to stop trading;
+- add the strongest passive fair-value branches;
+- add fragile pair edges only as small overlays;
+- keep runtime and traderData size controlled.
+
+That is the logic now implemented in ROUND5/final_trader.py.

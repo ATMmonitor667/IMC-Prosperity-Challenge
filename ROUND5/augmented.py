@@ -8,7 +8,7 @@ import math
 
 class Trader:
     """
-    IMC Prosperity 4 Round 5 final trader.
+    IMC Prosperity 4 Round 5 augmented trader.
 
     This version is built from the only architecture that actually worked well in your
     uploaded runs: adaptive counterparty-aware relative value plus safe market making.
@@ -26,6 +26,9 @@ class Trader:
       overlays for SLEEP_PODS/MICROCHIPS/TRANSLATORS.
     - Restores neutral two-sided core quoting from the profitable 570532 baseline;
       the failed 571500 run over-gated low-alpha quoting and mostly stopped trading.
+    - Adds final guardrails learned from 571500: avoided pair products only trade when
+      a pair overlay is active, and passive research branches can pause only the side
+      with bad live markouts rather than disabling the core.
     - Uses warm-up before trusting relative value so permanent level differences are not
       mistaken for mispricing.
     - Adds online alpha markout scoring. If a product starts losing live, its size decays.
@@ -344,6 +347,9 @@ class Trader:
         "TRANSLATOR_ECLIPSE_CHARCOAL",
         "TRANSLATOR_VOID_BLUE",
     }
+
+    PAIR_OVERLAY_MIN_TO_TRADE = 0.30
+    PASSIVE_SIDE_PAUSE_THRESHOLD = -0.85
 
     def _default_memory(self) -> Dict[str, Any]:
         return {
@@ -683,6 +689,7 @@ class Trader:
 
     def _make_passive_fair_value_orders(
         self,
+        mem: Dict[str, Any],
         product: str,
         depth: OrderDepth,
         model_fair: float,
@@ -703,6 +710,12 @@ class Trader:
 
         buy_signal = reservation - mid >= edge * spread
         sell_signal = mid - reservation >= edge * spread
+        bid_quality = self._side_quality(mem, product, "bid")
+        ask_quality = self._side_quality(mem, product, "ask")
+        if bid_quality < self.PASSIVE_SIDE_PAUSE_THRESHOLD and position >= 0:
+            buy_signal = False
+        if ask_quality < self.PASSIVE_SIDE_PAUSE_THRESHOLD and position <= 0:
+            sell_signal = False
 
         buy_used = 0
         sell_used = 0
@@ -1472,6 +1485,7 @@ class Trader:
                 branch_fair = self._passive_branch_fair(mem, product, fairs, state.timestamp)
                 if branch_fair is not None:
                     branch_orders = self._make_passive_fair_value_orders(
+                        mem,
                         product,
                         depth,
                         branch_fair,
@@ -1490,9 +1504,11 @@ class Trader:
             if product in self.HARD_AVOID:
                 result[product] = self._flatten_orders(product, depth, position)
                 continue
-            if product in self.AVOID and product not in self.PAIR_BRANCH_PRODUCTS:
-                result[product] = self._flatten_orders(product, depth, position)
-                continue
+            pair_overlay = pair_overlays.get(product, 0.0)
+            if product in self.AVOID:
+                if product not in self.PAIR_BRANCH_PRODUCTS or abs(pair_overlay) < self.PAIR_OVERLAY_MIN_TO_TRADE:
+                    result[product] = self._flatten_orders(product, depth, position)
+                    continue
 
             resid = math.log(fair) - family_mu.get(self._family(product), math.log(fair))
             rel, own_mr, trend, micro, vol = self._signals(mem, product, fair, resid, depth)
@@ -1509,7 +1525,7 @@ class Trader:
                 scale,
                 family_regimes.get(self._family(product), {}),
             )
-            alpha = self._clip(alpha + pair_overlays.get(product, 0.0), -5.0, 5.0)
+            alpha = self._clip(alpha + pair_overlay, -5.0, 5.0)
 
             target = self._target_position(product, position, alpha, scale, vol, spread)
             target, repair_only = self._state_adjust_target(
